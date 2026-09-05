@@ -107,12 +107,13 @@ final class DictationModel: ObservableObject {
         }
     }
 
-    /// 返去叫我哋出嚟嘅 app（例如 Notes）。用 UIApplication 嘅 suspend，個人 app 用冇問題。
+    /// 返去用戶原本嘅 app：鍵盤記低嘅 host app（URL scheme／workspace），冇就退場。
     private func returnToPreviousApp() {
         cameFromKeyboard = false
-        DebugLog.log("app", "suspending to return to previous app")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            UIControl().sendAction(#selector(URLSessionTask.suspend), to: UIApplication.shared, for: nil)
+        let host = config.recentHostBundleID
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            let how = HostAppReturn.returnToHost(host)
+            DebugLog.log("app", "return to host \(host ?? "unknown") via \(how)")
         }
     }
 

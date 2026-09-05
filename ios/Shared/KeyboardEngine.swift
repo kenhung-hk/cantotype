@@ -20,6 +20,10 @@ final class KeyboardEngine: ObservableObject {
     @Published var mode: String = RemoteConfig.shared.mode
     /// app 上一次錄音嘅結果，可以手動貼
     @Published var lastResult: String?
+    /// 鍵盤而家喺邊個 app
+    var hostBundleID: String? {
+        didSet { if let hostBundleID, hostBundleID != oldValue { DebugLog.log("kb", "host app = \(hostBundleID)") } }
+    }
 
     var proxyProvider: () -> UITextDocumentProxy? = { nil }
     var advanceKeyboard: () -> Void = {}

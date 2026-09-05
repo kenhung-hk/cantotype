@@ -27,6 +27,8 @@ final class RemoteConfig {
         static let lastResult = "lastResult"
         static let keyboardMicUnavailable = "keyboardMicUnavailable"
         static let keepAlive = "keepAlive"
+        static let lastHostBundleID = "lastHostBundleID"
+        static let lastHostSeenAt = "lastHostSeenAt"
     }
 
     /// 例：http://100.100.32.60:8787 或 http://kenhungs-mac-studio.tail1e4efd.ts.net:8787
@@ -108,6 +110,19 @@ final class RemoteConfig {
         defaults.removeObject(forKey: Keys.pendingInsertAt)
         guard Date().timeIntervalSince1970 - at < 300 else { return nil }
         return text
+    }
+
+    /// 鍵盤記低自己而家喺邊個 app 入面（例如 com.apple.mobilenotes），錄完 app 就開返呢個 app
+    func rememberHost(_ bundleID: String) {
+        defaults.set(bundleID, forKey: Keys.lastHostBundleID)
+        defaults.set(Date().timeIntervalSince1970, forKey: Keys.lastHostSeenAt)
+    }
+
+    /// 最近 3 分鐘內見過嘅 host app
+    var recentHostBundleID: String? {
+        guard let id = defaults.string(forKey: Keys.lastHostBundleID), !id.isEmpty else { return nil }
+        let at = defaults.double(forKey: Keys.lastHostSeenAt)
+        return Date().timeIntervalSince1970 - at < 180 ? id : nil
     }
 
     /// app 背景常駐（保持 audio session），畀 Action Button 隨時錄音

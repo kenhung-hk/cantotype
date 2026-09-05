@@ -58,12 +58,42 @@ final class KeyboardViewController: UIInputViewController {
         engine.refresh()
     }
 
+    /// host app 嘅 bundle id（私有 KVC，逐個 key 試，冇就 nil；唔會 throw）
+    private func hostBundleID() -> String? {
+        for key in ["_hostBundleID", "hostBundleID"] {
+            if responds(to: NSSelectorFromString(key)), let value = value(forKey: key) as? String, !value.isEmpty {
+                return value
+            }
+        }
+        if let context = extensionContext {
+            for key in ["_hostBundleID", "hostBundleID"] {
+                if context.responds(to: NSSelectorFromString(key)), let value = context.value(forKey: key) as? String, !value.isEmpty {
+                    return value
+                }
+            }
+        }
+        return nil
+    }
+
+    private func rememberHost() {
+        if let host = hostBundleID() {
+            RemoteConfig.shared.rememberHost(host)
+            engine.hostBundleID = host
+        } else {
+            DebugLog.log("kb", "host bundle id unavailable")
+        }
+    }
+
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        rememberHost()
         engine.refresh()
         pollTimer?.invalidate()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.engine.pollPending() }
+            Task { @MainActor in
+                self?.rememberHost()
+                self?.engine.pollPending()
+            }
         }
     }
 
