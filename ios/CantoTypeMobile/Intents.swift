@@ -3,9 +3,10 @@ import Foundation
 
 /// 「CantoType 錄音」：可以設去 Action Button、Shortcut、Siri。開 app 即刻錄，講完自動送去 Mac，
 /// 再自動返去原本 app，鍵盤會自動插入文字。
-/// `AudioRecordingIntent`：話畀 iOS 知呢個 Intent 會開始錄音，系統先會容許 app 喺背景啟動麥克風
-/// （否則背景 activate AVAudioSession 會失敗：error 'what' / 2003329396）。
-struct StartDictationIntent: AudioRecordingIntent {
+/// 普通 AppIntent，喺背景行。iOS 唔畀冷啟動嘅背景 app 開始錄音（error 'what'），
+/// 所以靠 KeepAlive（app 開過一次後保持 audio session 活躍）令錄音可以即刻開始。
+/// （曾試 AudioRecordingIntent：可以開麥克風，但 perform 返回後 AppIntents 內部 assert crash。）
+struct StartDictationIntent: AppIntent {
     static var title: LocalizedStringResource = "CantoType 錄音"
     static var description = IntentDescription("喺背景開始錄廣東話（唔會跳 app），講完自動送去 Mac 整理，CantoType 鍵盤會即刻插入文字。再按一次即刻停。")
     /// 唔開 app：Notes 同鍵盤留喺前面，錄完直接插入

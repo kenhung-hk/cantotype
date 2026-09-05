@@ -28,6 +28,12 @@ final class DictationModel: ObservableObject {
     @Published var cameFromKeyboard = false
     @Published var recordInApp: Bool { didSet { config.recordInApp = recordInApp } }
     @Published var autoStop: Bool { didSet { config.autoStop = autoStop } }
+    @Published var keepAlive: Bool {
+        didSet {
+            config.keepAlive = keepAlive
+            if keepAlive { KeepAlive.shared.start() } else { KeepAlive.shared.stop() }
+        }
+    }
 
     private var speechStarted = false
     private var lastLoudAt = Date()
@@ -54,7 +60,11 @@ final class DictationModel: ObservableObject {
         vocabulary = config.vocabulary
         recordInApp = config.recordInApp
         autoStop = config.autoStop
+        keepAlive = config.keepAlive
         DictationModel.shared = self
+        if config.keepAlive, AVAudioApplication.shared.recordPermission == .granted {
+            KeepAlive.shared.start()
+        }
         capture.onLevel = { [weak self] value in
             Task { @MainActor in
                 guard let self else { return }
@@ -123,6 +133,7 @@ final class DictationModel: ObservableObject {
                     phase = .error("未授權麥克風：去 iOS 設定 → CantoType 開返")
                     return
                 }
+                if keepAlive { KeepAlive.shared.start() }
                 do {
                     try capture.start()
                     phase = .recording

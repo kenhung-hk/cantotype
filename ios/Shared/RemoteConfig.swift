@@ -26,6 +26,7 @@ final class RemoteConfig {
         static let appOpenedAt = "appOpenedAt"
         static let lastResult = "lastResult"
         static let keyboardMicUnavailable = "keyboardMicUnavailable"
+        static let keepAlive = "keepAlive"
     }
 
     /// 例：http://100.100.32.60:8787 或 http://kenhungs-mac-studio.tail1e4efd.ts.net:8787
@@ -107,6 +108,12 @@ final class RemoteConfig {
         defaults.removeObject(forKey: Keys.pendingInsertAt)
         guard Date().timeIntervalSince1970 - at < 300 else { return nil }
         return text
+    }
+
+    /// app 背景常駐（保持 audio session），畀 Action Button 隨時錄音
+    var keepAlive: Bool {
+        get { defaults.object(forKey: Keys.keepAlive) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Keys.keepAlive) }
     }
 
     /// 鍵盤試過錄音失敗（iOS 唔畀）就記住，之後按 🎤 即刻顯示指引

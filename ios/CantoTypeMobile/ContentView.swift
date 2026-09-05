@@ -161,6 +161,9 @@ struct SettingsScreen: View {
                     TextEditor(text: $model.vocabulary).frame(minHeight: 80)
                 }
                 Section("鍵盤錄音方式") {
+                    Toggle("背景常駐（Action Button 隨時可以錄）", isOn: $model.keepAlive)
+                    Text("開住 CantoType 一次之後 app 會喺背景保持 audio session；唔要喺 app switcher 掃走佈。冇呢個 iOS 唔畀背景開始錄音。")
+                        .font(.caption).foregroundStyle(.secondary)
                     Toggle("按 🎤 一定跳去 CantoType app 錄", isOn: $model.recordInApp)
                     Toggle("跳去 app 錄時，靜音 1.3 秒自動停", isOn: $model.autoStop)
                     Text("iOS 唔畀鍵盤 extension 錄音，亦唔畀鍵盤開 app。最好用法：iOS 設定 → Action Button → 捷徑 → 「CantoType 錄音」。按一下即刻喺背景錄（唔會跳 app，Notes 同鍵盤留喺前面），講完停 1.3 秒自動送去 Mac，鍵盤即刻插入；再按一次即刻停。開始／結束有「嘟」聲。")
