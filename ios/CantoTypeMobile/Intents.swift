@@ -12,10 +12,12 @@ struct StartDictationIntent: AudioRecordingIntent {
     static var openAppWhenRun = false
 
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    func perform() async throws -> some IntentResult {
         DebugLog.log("intent", "StartDictationIntent.perform (background)")
+        // 唔回傳 dialog：AudioRecordingIntent 返 dialog 會令 AppIntents 內部 assert crash（crash log 00:53）
         let message = BackgroundDictation.shared.toggle()
-        return .result(dialog: IntentDialog(stringLiteral: message))
+        DebugLog.log("intent", message)
+        return .result()
     }
 }
 
