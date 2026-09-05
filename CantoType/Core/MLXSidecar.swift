@@ -16,6 +16,15 @@ final class MLXSidecar: ObservableObject {
         let llmModel: String?
         let llmReady: Bool
         let llmError: String?
+        let pid: Int32?
+        let parentPid: Int32?
+
+        /// 伺服器聲稱嘅 parent（上一個 app）已經唔存在，而且唔係我 → 係孤兒，唔應該接管。
+        var isOrphan: Bool {
+            guard let parentPid, parentPid > 0 else { return false }
+            if parentPid == ProcessInfo.processInfo.processIdentifier { return false }
+            return kill(parentPid, 0) != 0
+        }
     }
 
     @Published private(set) var state: ProcessState = .stopped
@@ -91,17 +100,21 @@ final class MLXSidecar: ObservableObject {
         wantedLLM = llmModel
         wantedLanguage = language
 
-        // 已經有個伺服器（例如上次冇關到）而且模型一樣就直接用
+        // 已經有個伺服器（例如上次冇關到）而且模型一樣就直接用；但如果佢嘅 app 已經死咗就唔要
         if let running = await Self.health(port: port) {
             let llmMatches = llmModel.lowercased() == "none" ? running.llmModel == nil : running.llmModel == llmModel
-            if running.whisperModel == whisperModel, llmMatches {
+            if running.whisperModel == whisperModel, llmMatches, !running.isOrphan {
                 state = .running
                 apply(running)
                 startHealthPolling(port: port)
                 return
             }
-            appendLog("port \(port) 有另一個設定嘅伺服器，關閉再重開…")
-            Self.killStray(port: port)
+            appendLog(running.isOrphan ? "port \(port) 有個上一次 app 留低嘅伺服器，關閉再重開…" : "port \(port) 有另一個設定嘅伺服器，關閉再重開…")
+            if let pid = running.pid, running.isOrphan {
+                kill(pid, SIGTERM)
+            } else {
+                Self.killStray(port: port)
+            }
             try? await Task.sleep(for: .seconds(1))
         }
 
@@ -244,7 +257,9 @@ final class MLXSidecar: ObservableObject {
             whisperModel: (json["model"] as? String) ?? "",
             llmModel: llm?["model"] as? String,
             llmReady: (llm?["ready"] as? Bool) ?? false,
-            llmError: llm?["error"] as? String
+            llmError: llm?["error"] as? String,
+            pid: (json["pid"] as? NSNumber)?.int32Value,
+            parentPid: (json["parent_pid"] as? NSNumber)?.int32Value
         )
     }
 

@@ -28,18 +28,22 @@ from __future__ import annotations
 
 import argparse
 import io
+import logging
+import logging.handlers
 import os
 import re
 import signal
+import sys
 import tempfile
 import threading
 import time
+import traceback
 import uuid
 import wave
 
 import numpy as np
 import uvicorn
-from fastapi import Body, FastAPI, File, Form, UploadFile
+from fastapi import Body, FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse
 from starlette.concurrency import run_in_threadpool
 
@@ -65,9 +69,56 @@ STATE = {
     "llm_error": None,
 }
 LLM_LOCK = threading.Lock()
-WHISPER_LOCK = threading.Lock()
+# Whisper 同 LLM 共用一個 lock：MLX／Metal 唔好由兩條 thread 同時落 command
+WHISPER_LOCK = LLM_LOCK
 LLMS: dict[str, tuple] = {}          # repo -> (model, tokenizer)，最多 keep 幾個畀試驗室比較
 LLM_CACHE_LIMIT = 3
+
+LOG_DIR = os.path.expanduser("~/Library/Logs/CantoType")
+os.makedirs(LOG_DIR, exist_ok=True)
+LOG_PATH = os.path.join(LOG_DIR, "mlx-server.log")
+log = logging.getLogger("cantotype")
+log.setLevel(logging.INFO)
+_handler = logging.handlers.RotatingFileHandler(LOG_PATH, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
+_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+log.addHandler(_handler)
+
+
+_STDOUT_BROKEN = False
+
+
+def safe_print(message: str) -> None:
+    """stdout 係 app 嘅 pipe；app 死咗 pipe 就斷，print 會 BrokenPipeError（之前就係咁令所有 request 500）。"""
+    global _STDOUT_BROKEN
+    if _STDOUT_BROKEN:
+        return
+    try:
+        print(message, flush=True)
+    except (BrokenPipeError, OSError, ValueError):
+        _STDOUT_BROKEN = True
+        try:
+            devnull = open(os.devnull, "w")
+            sys.stdout = devnull
+            sys.stderr = devnull
+        except OSError:
+            pass
+
+
+def say(message: str) -> None:
+    """同時印去 stdout（app 會收）同寫入 ~/Library/Logs/CantoType/mlx-server.log。"""
+    log.info(message)
+    safe_print(message)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception(request: Request, exc: Exception):
+    tb = traceback.format_exc()
+    log.error("unhandled error on %s %s\n%s", request.method, request.url.path, tb)
+    safe_print(f"[error] {request.url.path}: {type(exc).__name__}: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"error": {"message": f"{type(exc).__name__}: {exc}", "type": "server_error", "log": LOG_PATH}},
+    )
 THINK_RE = re.compile(r"<think>[\s\S]*?</think>", re.S)
 
 
@@ -131,7 +182,7 @@ def load_llm_background() -> None:
             from mlx_lm import generate, load
             from mlx_lm.sample_utils import make_sampler
 
-            print(f"載入 LLM {model_name} …（第一次要下載）", flush=True)
+            say(f"載入 LLM {model_name} …（第一次要下載）")
             started = time.time()
             model, tokenizer = load(model_name)
             # warm-up
@@ -143,10 +194,11 @@ def load_llm_background() -> None:
                 STATE["llm"], STATE["llm_tokenizer"] = model, tokenizer
                 LLMS[model_name] = (model, tokenizer)
                 STATE["llm_ready"] = True
-            print(f"LLM 就緒（{time.time() - started:.1f} 秒）", flush=True)
+            say(f"LLM 就緒（{time.time() - started:.1f} 秒）")
         except Exception as exc:  # noqa: BLE001
             STATE["llm_error"] = f"{type(exc).__name__}: {exc}"
-            print(f"LLM 載入失敗：{STATE['llm_error']}", flush=True)
+            log.error("LLM load failed\n%s", traceback.format_exc())
+            say(f"LLM 載入失敗：{STATE['llm_error']}")
 
     threading.Thread(target=worker, daemon=True, name="llm-loader").start()
 
@@ -159,10 +211,10 @@ def get_llm(name: str | None) -> tuple:
             return LLMS[name]
     from mlx_lm import load
 
-    print(f"載入 LLM {name} …", flush=True)
+    say(f"載入 LLM {name} …")
     started = time.time()
     model, tokenizer = load(name)
-    print(f"LLM {name} 就緒（{time.time() - started:.1f} 秒）", flush=True)
+    say(f"LLM {name} 就緒（{time.time() - started:.1f} 秒）")
     with LLM_LOCK:
         LLMS[name] = (model, tokenizer)
         while len(LLMS) > LLM_CACHE_LIMIT:
@@ -197,6 +249,8 @@ def run_llm(messages: list[dict], temperature: float, max_tokens: int, model_nam
 def health():
     return {
         "ok": True,
+        "pid": os.getpid(),
+        "parent_pid": STATE.get("parent_pid", 0),
         "model": STATE["whisper_model"],
         "language": STATE["language"],
         "llm": {
@@ -227,7 +281,7 @@ async def transcriptions(
             # prompt 太長／太怪會令 Whisper 完全唔出字或者出亂碼；咁就唔要 prompt 再試一次
             text = (result.get("text") or "").strip()
             if prompt and (not text or looks_garbled(text)) and float(np.abs(audio).mean()) > 1e-4:
-                print(f"[asr] {'empty' if not text else 'garbled'} with prompt, retrying without", flush=True)
+                say(f"[asr] {'empty' if not text else 'garbled'} with prompt, retrying without")
                 result = transcribe_array(audio, language, "", override)
                 result["prompt_dropped"] = True
             return result
@@ -255,7 +309,7 @@ async def transcriptions(
 
     text = (result.get("text") or "").strip()
     elapsed_ms = int((time.time() - started) * 1000)
-    print(f"[asr {elapsed_ms} ms{' ' + override if override else ''}] {text}", flush=True)
+    say(f"[asr {elapsed_ms} ms{' ' + override if override else ''}] {text}")
     if response_format == "text":
         return PlainTextResponse(text)
     return {"text": text, "language": result.get("language"), "elapsed_ms": elapsed_ms, "model": override or STATE["whisper_model"]}
@@ -275,9 +329,11 @@ async def chat_completions(body: dict = Body(...)):
     try:
         text = await run_in_threadpool(run_llm, messages, temperature, max_tokens, None if uses_default else requested)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse(status_code=500, content={"error": {"message": f"{type(exc).__name__}: {exc}", "type": "llm_error"}})
+        log.error("LLM request failed\n%s", traceback.format_exc())
+        safe_print(f"[error] llm: {type(exc).__name__}: {exc}")
+        return JSONResponse(status_code=500, content={"error": {"message": f"{type(exc).__name__}: {exc}", "type": "llm_error", "log": LOG_PATH}})
     elapsed_ms = int((time.time() - started) * 1000)
-    print(f"[llm {elapsed_ms} ms{'' if uses_default else ' ' + requested}] {text[:80]}", flush=True)
+    say(f"[llm {elapsed_ms} ms{'' if uses_default else ' ' + requested}] {text[:80]}")
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
         "object": "chat.completion",
@@ -296,11 +352,16 @@ def watch_parent(pid: int) -> None:
 
     def loop():
         while True:
+            gone = False
             try:
                 os.kill(pid, 0)
             except OSError:
-                print("parent gone, exiting", flush=True)
-                os._exit(0)
+                gone = True
+            if gone or os.getppid() == 1:
+                try:
+                    log.info("parent gone, exiting")
+                finally:
+                    os._exit(0)
             time.sleep(2)
 
     threading.Thread(target=loop, daemon=True).start()
@@ -325,14 +386,16 @@ def main():
         prompt=args.prompt,
         no_speech_threshold=args.no_speech_threshold,
     )
+    STATE["parent_pid"] = args.parent_pid
     if args.parent_pid:
         watch_parent(args.parent_pid)
     signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
 
-    print(f"載入 Whisper {STATE['whisper_model']} …", flush=True)
+    say(f"啟動：pid {os.getpid()}，parent {args.parent_pid}，log {LOG_PATH}")
+    say(f"載入 Whisper {STATE['whisper_model']} …")
     started = time.time()
     transcribe_array(np.zeros(16000, dtype=np.float32), STATE["language"], STATE["prompt"])
-    print(f"Whisper 就緒（{time.time() - started:.1f} 秒）。監聽 http://{args.host}:{args.port}", flush=True)
+    say(f"Whisper 就緒（{time.time() - started:.1f} 秒）。監聽 http://{args.host}:{args.port}")
     load_llm_background()
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
 
