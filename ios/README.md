@@ -22,9 +22,11 @@ xcodegen generate
 open CantoTypeMobile.xcodeproj    # 揀你部 iPhone，⌘R
 ```
 
-模擬器 build 唔需要 team：
+命令列亦得（iPhone 要解鎖，Wi-Fi 配對或者插線）：
 ```sh
-xcodebuild -project CantoTypeMobile.xcodeproj -scheme CantoTypeMobile -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+make sim        # 模擬器 build，唔需要 team
+make install    # 真機 build（自動簽名）+ 裝上 iPhone
+make launch     # 開 app
 ```
 
 裝好之後：
