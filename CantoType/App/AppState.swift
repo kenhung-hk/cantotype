@@ -55,6 +55,7 @@ final class AppState: ObservableObject {
     private let polisher = TextPolisher()
     private lazy var hud = HUDController(state: self)
     private lazy var labWindow = ModelLabWindowController(state: self)
+    private lazy var pairingWindow = PairingWindowController(state: self)
     private var appleBackends: [String: AppleSpeechBackend] = [:]
     private var cancellables = Set<AnyCancellable>()
     private var permissionTimer: Timer?
@@ -134,8 +135,14 @@ final class AppState: ObservableObject {
             let granted = await Permissions.requestMicrophone()
             microphoneGranted = granted
         }
-        if CommandLine.arguments.contains("--lab") {
-            showModelLab()
+        // 啟動參數開視窗：等 app 完全啟動先開，否則視窗會留喺 offscreen
+        let arguments = CommandLine.arguments
+        if arguments.contains("--lab") || arguments.contains("--qr") {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1))
+                if arguments.contains("--lab") { self.showModelLab() }
+                if arguments.contains("--qr") { self.showPairingQR() }
+            }
         }
     }
 
@@ -205,6 +212,10 @@ final class AppState: ObservableObject {
 
     func showModelLab() {
         labWindow.show()
+    }
+
+    func showPairingQR() {
+        pairingWindow.show()
     }
 
     func restartSidecar() {

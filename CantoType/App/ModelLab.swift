@@ -30,8 +30,9 @@ final class ModelLabWindowController {
             window.center()
             self.window = window
         }
-        window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        window?.orderFrontRegardless()
+        window?.makeKeyAndOrderFront(nil)
     }
 }
 

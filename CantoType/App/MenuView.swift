@@ -70,6 +70,8 @@ struct MenuView: View {
         }
         Divider()
 
+        Button("iPhone 配對 QR…") { state.showPairingQR() }
+            .keyboardShortcut("k")
         Button("模型試驗室…") { state.showModelLab() }
             .keyboardShortcut("l")
         SettingsLink { Text("設定…") }
