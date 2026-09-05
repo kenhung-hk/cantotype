@@ -1,0 +1,8 @@
+build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+.DS_Store
+server/.venv/
+server/__pycache__/
+build-sign/

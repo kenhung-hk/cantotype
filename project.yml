@@ -1,0 +1,53 @@
+name: CantoType
+options:
+  bundleIdPrefix: com.kenhung
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    # 簽名 team 放喺唔入 git 嘅 Config/Signing.xcconfig
+
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+targets:
+  CantoType:
+    type: application
+    platform: macOS
+    sources:
+      - path: CantoType
+        excludes:
+          - "**/.DS_Store"
+    info:
+      path: CantoType/Info.plist
+      properties:
+        CFBundleDisplayName: CantoType
+        CFBundleName: CantoType
+        LSUIElement: true
+        LSApplicationCategoryType: public.app-category.productivity
+        NSMicrophoneUsageDescription: CantoType 需要用麥克風錄低你講嘅廣東話，再轉成文字。
+        NSSpeechRecognitionUsageDescription: CantoType 用 macOS 內置嘅 on-device 語音辨識將錄音轉成文字。
+        NSHumanReadableCopyright: © 2026 Ken Hung
+    entitlements:
+      path: CantoType/CantoType.entitlements
+      properties:
+        com.apple.security.device.audio-input: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kenhung.CantoType
+        PRODUCT_NAME: CantoType
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ENABLE_HARDENED_RUNTIME: true
+        SWIFT_STRICT_CONCURRENCY: minimal
+        GENERATE_INFOPLIST_FILE: false
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+schemes:
+  CantoType:
+    build:
+      targets:
+        CantoType: all
+    run:
+      config: Debug
