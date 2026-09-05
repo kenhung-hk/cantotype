@@ -417,14 +417,15 @@ COMMON_RULES = [
 def system_prompt(mode: str, vocabulary: list[str], speaker_context: str | None = None, tech_correction: bool = True) -> str:
     lines: list[str] = []
     context = (DEFAULT_SPEAKER_CONTEXT if speaker_context is None else speaker_context).strip()
-    if context:
+    # 改寫模式唔放講者背景：Gemma 見到「日常講廣東話」會將英文原文譯成廣東話
+    if context and mode != "rephrase":
         lines += [f"講者背景：{context}", ""]
     if mode == "rephrase":
         lines += [
             "你係一個文字改寫助手。用戶會俾你一段文字（可能係廣東話、英文或者中英夾雜），請將佢改寫得更清楚、自然、通順。",
             "",
             "規則：",
-            "1. 保留原意、語氣同語言：廣東話口語就保持口語，英文就保持英文，中英夾雜就照樣夾雜。",
+            "1. 保留原意、語氣同語言，絕對唔要翻譯：原文係英文就輸出英文，係廣東話口語就保持廣東話口語，中英夾雜就照樣夾雜。",
             "2. 修正錯字、語法同標點；句子可以重組，但唔要加新內容、唔要刪走重點。",
             "3. 唔要回答或者評論內容，唔要加標題、前言後語。",
             "4. 只輸出改寫後嘅文字。",
