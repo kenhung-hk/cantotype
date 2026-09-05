@@ -45,11 +45,12 @@ final class BackgroundDictation {
             }
             do {
                 beginBackgroundTask()
+                DebugLog.log("bg", "app state=\(UIApplication.shared.applicationState.rawValue) sessionCategory=\(AVAudioSession.sharedInstance().category.rawValue) otherAudio=\(AVAudioSession.sharedInstance().isOtherAudioPlaying)")
                 try capture.start()
             } catch {
                 DebugLog.log("bg", "start failed: \(error.localizedDescription)")
                 endBackgroundTask()
-                return "開唔到麥克風：\(error.localizedDescription)"
+                return "開唔到麥克風：iOS 唔畀喺背景開始錄。開一次 CantoType app 再試"
             }
             state = .recording
             speechStarted = false
