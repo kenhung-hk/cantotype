@@ -221,67 +221,26 @@ final class AppSettings: ObservableObject {
     }
 }
 
-/// 常用 Whisper 模型。`hf` 格式（HuggingFace transformers）會由伺服器自動轉成 MLX。
+/// Whisper 模型清單。Ken 用真人聲比較後只保留呢兩個（Apple zh_HK 係第三個選擇，喺引擎設定揀）。
+/// 其他 HuggingFace 上嘅 Whisper／廣東話 fine-tune 可以喺試驗室貼 repo 加入，HF 格式會自動轉成 MLX。
 enum WhisperModelPreset: String, CaseIterable, Identifiable {
-    // MLX 格式，直接用
     case cantoneseTurbo = "Huan69/whisper-large-v3-turbo-cantonese-yue-english-mlx"
     case cantoneseTurboInt8 = "Huan69/whisper-large-v3-turbo-cantonese-yue-english-mlx-int8"
-    case largeV3 = "mlx-community/whisper-large-v3-mlx"
-    case largeV3Turbo = "mlx-community/whisper-large-v3-turbo"
-    case largeV2 = "mlx-community/whisper-large-v2-mlx"
-    case medium = "mlx-community/whisper-medium-mlx"
-    case small = "mlx-community/whisper-small-mlx"
-    case distilLargeV3 = "mlx-community/distil-whisper-large-v3"
-    // HuggingFace 格式嘅廣東話 fine-tune，第一次用會自動轉換
-    case alvanliiSmall = "alvanlii/whisper-small-cantonese"
-    case alvanliiDistilSmall = "alvanlii/distil-whisper-small-cantonese"
-    case khleelooLargeV3 = "khleeloo/whisper-large-v3-cantonese"
-    case simonLargeV2 = "simonl0909/whisper-large-v2-cantonese"
-    case wcyatMedium = "wcyat/whisper-medium-yue"
-    case safecantoneseSmall = "safecantonese/whisper-small-yue-full"
-    case scryaLargeV2 = "Scrya/whisper-large-v2-cantonese"
-    case wingskhTurbo = "wingskh/whisper-large-v3-turbo-cantonese"
-    case liujgoj = "Yvthyvq/Liujgoj-Cantonese-whisper"
 
-    static let defaultModel = WhisperModelPreset.largeV3.rawValue
+    static let defaultModel = WhisperModelPreset.cantoneseTurbo.rawValue
 
     var id: String { rawValue }
 
     /// 需要由 HF 格式轉成 MLX 先用得。
-    var needsConversion: Bool {
-        switch self {
-        case .cantoneseTurbo, .cantoneseTurboInt8, .largeV3, .largeV3Turbo, .largeV2, .medium, .small, .distilLargeV3: return false
-        default: return true
-        }
-    }
+    var needsConversion: Bool { false }
 
-    /// 試驗室預設剔選嘅幾個。
-    var selectedByDefault: Bool {
-        switch self {
-        case .cantoneseTurbo, .largeV3, .alvanliiSmall: return true
-        default: return false
-        }
-    }
+    /// 試驗室預設剔選。
+    var selectedByDefault: Bool { true }
 
     var label: String {
         switch self {
-        case .cantoneseTurbo: return "large-v3-turbo 廣東話＋英文 fine-tune（1.6 GB，快）"
-        case .cantoneseTurboInt8: return "同上 int8（0.9 GB）"
-        case .largeV3: return "large-v3 原版（3 GB，預設）"
-        case .largeV3Turbo: return "large-v3-turbo 原版（1.6 GB）"
-        case .largeV2: return "large-v2 原版（3 GB）"
-        case .medium: return "medium 原版（1.5 GB）"
-        case .small: return "small 原版（0.5 GB）"
-        case .distilLargeV3: return "distil-large-v3（1.5 GB，英文為主）"
-        case .alvanliiSmall: return "alvanlii small 廣東話 fine-tune（1 GB，最多人用，自動轉換）"
-        case .alvanliiDistilSmall: return "alvanlii distil-small 廣東話（0.6 GB，自動轉換）"
-        case .khleelooLargeV3: return "khleeloo large-v3 廣東話 fine-tune（6 GB，自動轉換）"
-        case .simonLargeV2: return "simonl0909 large-v2 廣東話 fine-tune（6 GB，自動轉換）"
-        case .wcyatMedium: return "wcyat medium 粵語 fine-tune（3 GB，自動轉換）"
-        case .safecantoneseSmall: return "safecantonese small 粵語 fine-tune（1 GB，自動轉換）"
-        case .scryaLargeV2: return "Scrya large-v2 廣東話 fine-tune（6 GB，自動轉換）"
-        case .wingskhTurbo: return "wingskh large-v3-turbo 廣東話 fine-tune（1.6 GB，自動轉換）"
-        case .liujgoj: return "Liujgoj Cantonese whisper（自動轉換）"
+        case .cantoneseTurbo: return "large-v3-turbo 廣東話＋英文 fine-tune（1.6 GB，預設）"
+        case .cantoneseTurboInt8: return "同上 int8 版（0.9 GB，較快）"
         }
     }
 }

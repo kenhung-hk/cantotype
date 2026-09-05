@@ -158,7 +158,6 @@ final class ModelLab: ObservableObject {
     private func buildCandidates() {
         var asr: [ASRCandidate] = [
             ASRCandidate(kind: .apple(locale: "zh_HK"), isCustom: false),
-            ASRCandidate(kind: .apple(locale: "yue_CN"), isCustom: false),
         ]
         asr += WhisperModelPreset.allCases.map {
             ASRCandidate(kind: $0.needsConversion ? .hf(repo: $0.rawValue) : .mlx(repo: $0.rawValue), isCustom: false)

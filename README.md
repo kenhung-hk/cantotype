@@ -53,7 +53,7 @@ Menubar → 「模型試驗室…」（⌘L）。錄一段（或者載入音檔�
 
 - 填埋你實際講咗啲乜，每個模型會顯示字錯率（CER，唔計標點空格）；改參考文字會即時重算
 - 「上一次輸入嘅錄音」載入你最近一次真正口述嘅音檔，用真人聲比較（TTS 測試音檔同真人聲結果可以差好遠）
-- 內置候選：Apple zh_HK／yue_CN、8 個 MLX 格式 Whisper（原版 large-v3／turbo／v2／medium／small／distil、廣東話 fine-tune 同 int8）、9 個 HuggingFace 格式嘅廣東話 fine-tune（alvanlii、khleeloo、simonl0909、wcyat、safecantonese、Scrya、wingskh、Liujgoj）
+- 內置候選只留三個（用真人聲比較過最好嘅）：Apple zh_HK、廣東話＋英文 fine-tune turbo、同佢嘅 int8 版。其他 Whisper（原版 large-v3、alvanlii、khleeloo 等）可以貼 repo 加入
 - HuggingFace 格式嘅 Whisper 會由伺服器**自動轉成 MLX**（`server/convert_whisper.py`，改編自 mlx-examples），存喺 `~/Library/Application Support/CantoType/models/whisper/`；貼任何 Whisper repo 入去都得，伺服器會先查格式
 - 舊版 Whisper（large-v3 之前，vocab 51865）冇 `yue` token，伺服器會自動改用 `zh` 解碼
 - LLM 候選：Qwen3 4B／8B／14B／32B／30B-A3B（兩個版本）、Gemma 3 12B／27B、Qwen2.5 14B、Mistral Small 3.2、gpt-oss 20B、Llama 3.3 70B、兩個廣東話 fine-tune 7B；有 Ollama 的話佢嘅模型都會出現
