@@ -30,6 +30,8 @@ final class MLXSidecar: ObservableObject {
     private var wantedWhisper = ""
     private var wantedLLM = "none"
     private var wantedLanguage = "yue"
+    private var launchedAt: Date?
+    private var quickFailures = 0
 
     var lastLogLine: String { recentLog.last ?? "" }
     var isRunning: Bool { state == .starting || state == .running }
@@ -144,11 +146,13 @@ final class MLXSidecar: ObservableObject {
         do {
             try proc.run()
             process = proc
+            launchedAt = Date()
             state = .starting
             appendLog("啟動 uv run mlx_server.py --model \(whisperModel) --llm \(llmModel) --port \(port)")
             startHealthPolling(port: port)
         } catch {
             state = .failed(error.localizedDescription)
+            NSLog("CantoType MLX sidecar failed to launch: %@", error.localizedDescription)
         }
     }
 
@@ -198,6 +202,20 @@ final class MLXSidecar: ObservableObject {
         llmReady = false
         if case .stopped = state { return }
         state = .failed("伺服器退出（code \(code)）：\(lastLogLine)")
+        NSLog("CantoType MLX sidecar exited (code %d). Last log: %@", code, recentLog.suffix(8).joined(separator: " | "))
+
+        // 啟動後好快就死（例如 port 仲被上一個伺服器霸住）就自動重試兩次
+        if let launchedAt, Date().timeIntervalSince(launchedAt) < 20, quickFailures < 2 {
+            quickFailures += 1
+            appendLog("啟動失敗，\(quickFailures) 次重試…")
+            let (whisper, llm, port, language) = (wantedWhisper, wantedLLM, wantedPort, wantedLanguage)
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(3))
+                await self?.startOrAdopt(whisperModel: whisper, llmModel: llm, port: port, language: language)
+            }
+        } else if state != .stopped {
+            quickFailures = 0
+        }
     }
 
     private func appendLog(_ text: String) {

@@ -26,6 +26,8 @@ make open       # 用 Xcode 開，⌘R 行
 make run        # xcodebuild 編譯再啟動
 ```
 
+`CantoType --lab` 啟動時直接開模型試驗室。
+
 第一次行會要兩個權限，menubar 個 mic icon 嘅選單會提你：
 
 | 權限 | 用途 |
@@ -58,6 +60,15 @@ $BIN --transcribe ~/Desktop/sample.wav --locale yue_CN   # Apple 粵語（簡體
 $BIN --transcribe ~/Desktop/sample.wav --backend http    # 用 Whisper 伺服器
 $BIN --help
 ```
+
+## 模型試驗室
+
+Menubar → 「模型試驗室…」（⌘L）。錄一段（或者載入音檔）→ 一次過跑 Apple 同幾個 MLX Whisper 模型並排比較 → 揀一個結果丟俾幾個 LLM 比較 → 每行有「用呢個」直接設為預設。
+
+- 填埋你實際講咗啲乜，每個模型會顯示字錯率（CER，唔計標點空格）
+- 任何 HuggingFace 上 MLX 格式嘅 Whisper／LLM repo 都可以加入去試；第一次會下載
+- 伺服器按 request 換模型：Whisper 同一時間 keep 一個，LLM 最多 keep 三個喺記憶體
+- 有 Ollama 的話佢嘅模型會自動出現喺 LLM 列表（預設唔剔）
 
 ## 語音辨識引擎
 
@@ -116,6 +127,7 @@ CantoType/
     MenuView.swift              menubar 選單
     SettingsView.swift          設定視窗（一般／辨識／整理／權限）
     HUDPanel.swift              屏幕底部浮動狀態膠囊
+    ModelLab.swift              模型試驗室：錄音、並排比較辨識／LLM 模型、CER、設為預設
   Core/
     Settings.swift              UserDefaults 設定、快捷鍵／模式／Whisper 模型 enum
     MLXSidecar.swift            自動啟動／監察本地 MLX 伺服器（Whisper + LLM）

@@ -70,6 +70,8 @@ struct MenuView: View {
         }
         Divider()
 
+        Button("模型試驗室…") { state.showModelLab() }
+            .keyboardShortcut("l")
         SettingsLink { Text("設定…") }
             .keyboardShortcut(",")
         Button("結束 CantoType") { NSApp.terminate(nil) }

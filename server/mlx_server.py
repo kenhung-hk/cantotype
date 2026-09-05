@@ -39,8 +39,9 @@ import wave
 
 import numpy as np
 import uvicorn
-from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi import Body, FastAPI, File, Form, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse
+from starlette.concurrency import run_in_threadpool
 
 import mlx_whisper
 
@@ -65,6 +66,8 @@ STATE = {
 }
 LLM_LOCK = threading.Lock()
 WHISPER_LOCK = threading.Lock()
+LLMS: dict[str, tuple] = {}          # repo -> (model, tokenizer)，最多 keep 幾個畀試驗室比較
+LLM_CACHE_LIMIT = 3
 THINK_RE = re.compile(r"<think>[\s\S]*?</think>", re.S)
 
 
@@ -97,11 +100,12 @@ def normalize(audio: np.ndarray, target_peak: float = 0.7, max_gain_db: float = 
     return np.clip(audio * gain, -1.0, 1.0).astype(np.float32)
 
 
-def transcribe_array(audio: np.ndarray, language: str | None, prompt: str | None) -> dict:
+def transcribe_array(audio: np.ndarray, language: str | None, prompt: str | None, model: str | None = None) -> dict:
+    """`model` 非空就用另一個 Whisper repo（模型試驗室用）；mlx_whisper 會自己換模型。"""
     with WHISPER_LOCK:
         return mlx_whisper.transcribe(
             audio,
-            path_or_hf_repo=STATE["whisper_model"],
+            path_or_hf_repo=model or STATE["whisper_model"],
             language=language or STATE["language"],
             initial_prompt=prompt if prompt is not None else STATE["prompt"],
             condition_on_previous_text=False,
@@ -132,6 +136,7 @@ def load_llm_background() -> None:
             generate(model, tokenizer, prompt=prompt, max_tokens=4, sampler=make_sampler(temp=0.0), verbose=False)
             with LLM_LOCK:
                 STATE["llm"], STATE["llm_tokenizer"] = model, tokenizer
+                LLMS[model_name] = (model, tokenizer)
                 STATE["llm_ready"] = True
             print(f"LLM 就緒（{time.time() - started:.1f} 秒）", flush=True)
         except Exception as exc:  # noqa: BLE001
@@ -141,12 +146,34 @@ def load_llm_background() -> None:
     threading.Thread(target=worker, daemon=True, name="llm-loader").start()
 
 
-def run_llm(messages: list[dict], temperature: float, max_tokens: int) -> str:
+def get_llm(name: str | None) -> tuple:
+    """要求嘅模型未載入就即場載入（可能要下載）；預設模型永遠保留。"""
+    name = (name or "").strip() or STATE["llm_model"]
+    with LLM_LOCK:
+        if name in LLMS:
+            return LLMS[name]
+    from mlx_lm import load
+
+    print(f"載入 LLM {name} …", flush=True)
+    started = time.time()
+    model, tokenizer = load(name)
+    print(f"LLM {name} 就緒（{time.time() - started:.1f} 秒）", flush=True)
+    with LLM_LOCK:
+        LLMS[name] = (model, tokenizer)
+        while len(LLMS) > LLM_CACHE_LIMIT:
+            victim = next((k for k in LLMS if k not in (name, STATE["llm_model"])), None)
+            if victim is None:
+                break
+            del LLMS[victim]
+    return model, tokenizer
+
+
+def run_llm(messages: list[dict], temperature: float, max_tokens: int, model_name: str | None = None) -> str:
     from mlx_lm import generate
     from mlx_lm.sample_utils import make_sampler
 
+    model, tokenizer = get_llm(model_name)
     with LLM_LOCK:
-        model, tokenizer = STATE["llm"], STATE["llm_tokenizer"]
         prompt = tokenizer.apply_chat_template(messages, add_generation_prompt=True, enable_thinking=False)
         text = generate(
             model,
@@ -171,6 +198,7 @@ def health():
             "model": None if STATE["llm_model"].lower() == "none" else STATE["llm_model"],
             "ready": STATE["llm_ready"],
             "error": STATE["llm_error"],
+            "loaded": list(LLMS.keys()),
         },
     }
 
@@ -185,54 +213,64 @@ async def transcriptions(
 ):
     data = await file.read()
     started = time.time()
-    try:
-        audio = normalize(decode_wav(data))
-        result = transcribe_array(audio, language, prompt)
-    except Exception:  # noqa: BLE001  唔係 16k WAV 就交畀 ffmpeg 解碼
-        suffix = os.path.splitext(file.filename or "")[1] or ".bin"
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-            tmp.write(data)
-            path = tmp.name
+    override = model.strip() or None
+
+    def work() -> dict:
         try:
-            with WHISPER_LOCK:
-                result = mlx_whisper.transcribe(
-                    path,
-                    path_or_hf_repo=STATE["whisper_model"],
-                    language=language or STATE["language"],
-                    initial_prompt=prompt if prompt is not None else STATE["prompt"],
-                    condition_on_previous_text=False,
-                    no_speech_threshold=STATE["no_speech_threshold"],
-                    fp16=True,
-                )
-        finally:
-            os.unlink(path)
+            audio = normalize(decode_wav(data))
+            return transcribe_array(audio, language, prompt, override)
+        except Exception:  # noqa: BLE001  唔係 16k WAV 就交畀 ffmpeg 解碼
+            suffix = os.path.splitext(file.filename or "")[1] or ".bin"
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                tmp.write(data)
+                path = tmp.name
+            try:
+                with WHISPER_LOCK:
+                    return mlx_whisper.transcribe(
+                        path,
+                        path_or_hf_repo=override or STATE["whisper_model"],
+                        language=language or STATE["language"],
+                        initial_prompt=prompt if prompt is not None else STATE["prompt"],
+                        condition_on_previous_text=False,
+                        no_speech_threshold=STATE["no_speech_threshold"],
+                        fp16=True,
+                    )
+            finally:
+                os.unlink(path)
+
+    # 重工作放去 thread，event loop 先可以繼續答 /health（下載模型期間都係）
+    result = await run_in_threadpool(work)
 
     text = (result.get("text") or "").strip()
     elapsed_ms = int((time.time() - started) * 1000)
-    print(f"[asr {elapsed_ms} ms] {text}", flush=True)
+    print(f"[asr {elapsed_ms} ms{' ' + override if override else ''}] {text}", flush=True)
     if response_format == "text":
         return PlainTextResponse(text)
-    return {"text": text, "language": result.get("language"), "elapsed_ms": elapsed_ms}
+    return {"text": text, "language": result.get("language"), "elapsed_ms": elapsed_ms, "model": override or STATE["whisper_model"]}
 
 
 @app.post("/v1/chat/completions")
-async def chat_completions(request: Request):
-    body = await request.json()
-    if not STATE["llm_ready"]:
+async def chat_completions(body: dict = Body(...)):
+    requested = (body.get("model") or "").strip()
+    uses_default = not requested or requested == STATE["llm_model"]
+    if uses_default and not STATE["llm_ready"]:
         detail = STATE["llm_error"] or "LLM 仍在載入"
         return JSONResponse(status_code=503, content={"error": {"message": detail, "type": "llm_not_ready"}})
     messages = body.get("messages") or []
     temperature = float(body.get("temperature", 0.1))
     max_tokens = int(body.get("max_tokens", 1024))
     started = time.time()
-    text = run_llm(messages, temperature, max_tokens)
+    try:
+        text = await run_in_threadpool(run_llm, messages, temperature, max_tokens, None if uses_default else requested)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse(status_code=500, content={"error": {"message": f"{type(exc).__name__}: {exc}", "type": "llm_error"}})
     elapsed_ms = int((time.time() - started) * 1000)
-    print(f"[llm {elapsed_ms} ms] {text[:80]}", flush=True)
+    print(f"[llm {elapsed_ms} ms{'' if uses_default else ' ' + requested}] {text[:80]}", flush=True)
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
         "object": "chat.completion",
         "created": int(time.time()),
-        "model": STATE["llm_model"],
+        "model": requested or STATE["llm_model"],
         "choices": [{"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "stop"}],
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         "elapsed_ms": elapsed_ms,

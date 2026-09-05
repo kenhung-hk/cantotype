@@ -54,6 +54,7 @@ final class AppState: ObservableObject {
     private let hotkey = HotkeyMonitor()
     private let polisher = TextPolisher()
     private lazy var hud = HUDController(state: self)
+    private lazy var labWindow = ModelLabWindowController(state: self)
     private var appleBackends: [String: AppleSpeechBackend] = [:]
     private var cancellables = Set<AnyCancellable>()
     private var permissionTimer: Timer?
@@ -131,6 +132,9 @@ final class AppState: ObservableObject {
             let granted = await Permissions.requestMicrophone()
             microphoneGranted = granted
         }
+        if CommandLine.arguments.contains("--lab") {
+            showModelLab()
+        }
     }
 
     func shutdown() {
@@ -176,6 +180,23 @@ final class AppState: ObservableObject {
         } else {
             sidecar.stop()
         }
+    }
+
+    /// 模型試驗室要用 MLX 伺服器時，就算目前引擎係 Apple 都起佢。
+    func ensureSidecarForLab() {
+        guard settings.manageSidecar, let url = URL(string: settings.httpURL), let host = url.host(),
+              ["127.0.0.1", "localhost", "::1"].contains(host)
+        else { return }
+        sidecar.ensureRunning(
+            whisperModel: settings.whisperModel,
+            llmModel: settings.sidecarLLMModel,
+            port: url.port ?? 80,
+            language: settings.httpLanguage
+        )
+    }
+
+    func showModelLab() {
+        labWindow.show()
     }
 
     func restartSidecar() {

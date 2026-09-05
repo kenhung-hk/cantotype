@@ -155,6 +155,8 @@ struct PolishConfig {
     var ollamaModel: String
     /// Ollama 主模型回應斬斷時用嘅備用模型；留空就直接用原文。
     var ollamaFallbackModel: String
+    /// 試驗室載入新模型可能要幾分鐘，所以可以較長。
+    var requestTimeout: TimeInterval = 90
 
     static let cliDefault = PolishConfig(
         provider: .mlx,
@@ -188,7 +190,7 @@ final class TextPolisher {
         switch config.provider {
         case .mlx:
             guard let base = URL(string: config.mlxBaseURL) else { throw PolishError.badHost }
-            reply = try await OpenAIChatClient(baseURL: base).chat(model: config.mlxModel, messages: messages)
+            reply = try await OpenAIChatClient(baseURL: base).chat(model: config.mlxModel, messages: messages, timeout: config.requestTimeout)
         case .ollama:
             reply = try await polishWithOllama(messages: messages, config: config)
         }
@@ -205,12 +207,12 @@ final class TextPolisher {
         guard let hostURL = URL(string: config.ollamaHost) else { throw PolishError.badHost }
         let client = OllamaClient(host: hostURL)
         var attempts: [() async throws -> String] = [
-            { try await client.chat(model: config.ollamaModel, messages: messages) },
-            { try await client.chat(model: config.ollamaModel, messages: messages, temperature: 0.6, seed: 7) },
+            { try await client.chat(model: config.ollamaModel, messages: messages, timeout: config.requestTimeout) },
+            { try await client.chat(model: config.ollamaModel, messages: messages, temperature: 0.6, seed: 7, timeout: config.requestTimeout) },
         ]
         let fallback = config.ollamaFallbackModel.trimmingCharacters(in: .whitespaces)
         if !fallback.isEmpty, fallback != config.ollamaModel {
-            attempts.append { try await client.chat(model: fallback, messages: messages) }
+            attempts.append { try await client.chat(model: fallback, messages: messages, timeout: config.requestTimeout) }
         }
         for attempt in attempts {
             do {

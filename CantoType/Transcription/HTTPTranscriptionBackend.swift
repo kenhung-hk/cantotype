@@ -6,11 +6,13 @@ final class HTTPTranscriptionBackend: TranscriptionBackend {
     let url: URL
     let model: String
     let language: String
+    let timeout: TimeInterval
 
-    init(url: URL, model: String, language: String) {
+    init(url: URL, model: String, language: String, timeout: TimeInterval = 120) {
         self.url = url
         self.model = model
         self.language = language
+        self.timeout = timeout
     }
 
     var displayName: String { "HTTP（\(url.host() ?? url.absoluteString)）" }
@@ -23,7 +25,7 @@ final class HTTPTranscriptionBackend: TranscriptionBackend {
         let boundary = "CantoType-\(UUID().uuidString)"
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 120
+        request.timeoutInterval = timeout
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         var body = Data()
