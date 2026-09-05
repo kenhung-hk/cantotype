@@ -25,6 +25,7 @@ final class RemoteConfig {
         static let pendingInsertAt = "pendingInsertAt"
         static let appOpenedAt = "appOpenedAt"
         static let lastResult = "lastResult"
+        static let keyboardMicUnavailable = "keyboardMicUnavailable"
     }
 
     /// 例：http://100.100.32.60:8787 或 http://kenhungs-mac-studio.tail1e4efd.ts.net:8787
@@ -106,6 +107,12 @@ final class RemoteConfig {
         defaults.removeObject(forKey: Keys.pendingInsertAt)
         guard Date().timeIntervalSince1970 - at < 300 else { return nil }
         return text
+    }
+
+    /// 鍵盤試過錄音失敗（iOS 唔畀）就記住，之後按 🎤 即刻顯示指引
+    var keyboardMicUnavailable: Bool {
+        get { defaults.bool(forKey: Keys.keyboardMicUnavailable) }
+        set { defaults.set(newValue, forKey: Keys.keyboardMicUnavailable) }
     }
 
     /// 上一次 app 錄音嘅結果（鍵盤「貼上上次」用）

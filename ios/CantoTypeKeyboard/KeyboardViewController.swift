@@ -24,19 +24,7 @@ final class KeyboardViewController: UIInputViewController {
                 }
                 attempted.append("ctx")
             }
-            // 2) UIApplication.sharedApplication（extension process 內部其實有一個）
-            if let appClass = NSClassFromString("UIApplication") as? NSObject.Type,
-               let shared = appClass.value(forKey: "sharedApplication") as? NSObject {
-                let open = NSSelectorFromString("openURL:options:completionHandler:")
-                if shared.responds(to: open) {
-                    _ = shared.perform(open, with: url, with: [:] as NSDictionary)
-                    attempted.append("shared")
-                } else if shared.responds(to: NSSelectorFromString("openURL:")) {
-                    _ = shared.perform(NSSelectorFromString("openURL:"), with: url)
-                    attempted.append("shared-legacy")
-                }
-            }
-            // 3) responder chain
+            // 2) responder chain（iOS 26 係無效嘅，但唔會 crash）
             let selector = NSSelectorFromString("openURL:")
             var responder: UIResponder? = self.next
             while let current = responder {

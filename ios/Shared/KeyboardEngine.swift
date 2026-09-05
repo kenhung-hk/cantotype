@@ -148,7 +148,7 @@ final class KeyboardEngine: ObservableObject {
                 show("要開「允許完整存取」先可以連 Mac")
                 return
             }
-            if config.recordInApp {
+            if config.recordInApp || config.keyboardMicUnavailable {
                 hopToApp()
                 return
             }
@@ -158,8 +158,9 @@ final class KeyboardEngine: ObservableObject {
                 status = "錄音中…再按一下停止"
                 DebugLog.log("kb", "in-keyboard recording started")
             } catch {
-                // iOS 唔畀鍵盤錄音：跳去 app 錄，錄完會自動返嚟插入
+                // iOS 唔畀鍵盤錄音（AVAudioSession 會失敗）：記住，之後直接指引
                 DebugLog.log("kb", "in-keyboard recording failed: \(error.localizedDescription)")
+                config.keyboardMicUnavailable = true
                 phase = .idle
                 hopToApp()
             }
@@ -176,12 +177,12 @@ final class KeyboardEngine: ObservableObject {
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(1.5))
             guard let self else { return }
-            DebugLog.log("kb", "hop verified=\(self.config.appOpened(since: requested))")
+            DebugLog.log("kb", "hop verified=\(self.config.appOpened(since: requested)) strategy=\(strategy)")
             if self.config.appOpened(since: requested) {
                 self.show("已跳去 CantoType 錄音，講完會自動返嚟插入")
             } else {
-                // 跳唔到：iOS 唔畀鍵盤開 app。最穩陣係 Action Button／Shortcut 開「CantoType 錄音」
-                self.show("iOS 唔畀鍵盤開 app（\(strategy)）。用 Action Button 或 Shortcut「CantoType 錄音」，返嚟會自動插入")
+                // iOS 26 唔畀鍵盤錄音亦唔畀鍵盤開 app：用 Action Button／Shortcut「CantoType 錄音」
+                self.status = "iOS 唔畀鍵盤錄音：按 Action Button（CantoType 錄音）講嘢，返嚟呢度會自動插入"
             }
         }
     }
