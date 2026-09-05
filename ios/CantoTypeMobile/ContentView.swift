@@ -2,11 +2,20 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var model: DictationModel
+    @State private var tab = CommandLine.arguments.contains("--settings") ? 1 : 0
 
     var body: some View {
-        TabView {
-            DictateView().tabItem { Label("口述", systemImage: "mic") }
-            SettingsScreen().tabItem { Label("設定", systemImage: "gear") }
+        if CommandLine.arguments.contains("--keyboard-preview") {
+            KeyboardPreviewScreen()
+        } else {
+            mainTabs
+        }
+    }
+
+    private var mainTabs: some View {
+        TabView(selection: $tab) {
+            DictateView().tabItem { Label("口述", systemImage: "mic") }.tag(0)
+            SettingsScreen().tabItem { Label("設定", systemImage: "gear") }.tag(1)
         }
     }
 }
@@ -110,6 +119,7 @@ struct SettingsScreen: View {
     @EnvironmentObject var model: DictationModel
     @State private var showScanner = false
     @State private var scanMessage = ""
+    @StateObject private var previewEngine = KeyboardEngine()
 
     var body: some View {
         NavigationStack {
@@ -148,7 +158,11 @@ struct SettingsScreen: View {
                     TextEditor(text: $model.vocabulary).frame(minHeight: 80)
                 }
                 Section("鍵盤") {
-                    Text("1. iOS 設定 → 一般 → 鍵盤 → 鍵盤 → 新增鍵盤 → CantoType 鍵盤\n2. 再入 CantoType 鍵盤 → 開「允許完整存取」（連 Mac 要用網絡）\n3. 打字時按 🌐 切換到 CantoType 鍵盤，🎤 錄音、✨ 改寫")
+                    KeyboardView(engine: previewEngine)
+                        .frame(height: KeyboardView.totalHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .listRowInsets(EdgeInsets())
+                    Text("1. iOS 設定 → 一般 → 鍵盤 → 鍵盤 → 新增鍵盤 → CantoType 鍵盤\n2. 再入 CantoType 鍵盤 → 開「允許完整存取」（連 Mac 要用網絡）\n3. 打字時按 🌐 切換到 CantoType 鍵盤：頂行 🎤 錄音、✨ 改寫、口語／書面切換")
                         .font(.footnote)
                     Button("開啟 iOS 設定") {
                         if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
@@ -163,5 +177,25 @@ struct SettingsScreen: View {
                 }
             }
         }
+    }
+}
+
+
+/// `--keyboard-preview` 啟動參數：模擬鍵盤喺屏幕底部嘅樣（開發／截圖用）
+struct KeyboardPreviewScreen: View {
+    @StateObject private var engine = KeyboardEngine()
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer()
+            Text("咁而家呢個 repo 係咪真係 work？")
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.secondarySystemBackground))
+                .padding()
+            KeyboardView(engine: engine)
+        }
+        .ignoresSafeArea(edges: .bottom)
+        .background(Color(.systemBackground))
     }
 }

@@ -15,6 +15,9 @@ final class KeyboardEngine: ObservableObject {
     @Published var level: Float = 0
     @Published var hasFullAccess = false
     @Published var hasText = false
+    /// 跟 host app 嘅 keyboardAppearance；nil 就跟系統
+    @Published var darkAppearance: Bool?
+    @Published var mode: String = RemoteConfig.shared.mode
 
     var proxyProvider: () -> UITextDocumentProxy? = { nil }
     var advanceKeyboard: () -> Void = {}
@@ -31,9 +34,28 @@ final class KeyboardEngine: ObservableObject {
         }
     }
 
+    var modeLabel: String {
+        switch mode {
+        case "written": return "書面"
+        case "raw": return "原文"
+        default: return "口語"
+        }
+    }
+
+    /// 口語 → 書面 → 原文 → 口語
+    func cycleMode() {
+        mode = mode == "colloquial" ? "written" : (mode == "written" ? "raw" : "colloquial")
+        config.mode = mode
+        show("整理模式：\(modeLabel)")
+    }
+
     func refresh() {
         hasFullAccess = fullAccessProvider()
         let proxy = proxyProvider()
+        if let appearance = proxy?.keyboardAppearance {
+            darkAppearance = appearance == .dark ? true : (appearance == .light ? false : nil)
+        }
+        mode = config.mode
         hasText = !((proxy?.documentContextBeforeInput ?? "").isEmpty && (proxy?.documentContextAfterInput ?? "").isEmpty)
         // 句首自動大寫
         if let before = proxy?.documentContextBeforeInput, !before.isEmpty {
@@ -115,7 +137,7 @@ final class KeyboardEngine: ObservableObject {
         phase = .sending
         status = "傳去 Mac 辨識…"
         do {
-            let result = try await CantoTypeClient(config: config).dictate(wav: wav, mode: config.mode)
+            let result = try await CantoTypeClient(config: config).dictate(wav: wav, mode: mode)
             if result.text.isEmpty {
                 show("聽唔到內容，試下大聲啲")
             } else {
