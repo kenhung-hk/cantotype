@@ -25,6 +25,8 @@ final class AudioRecorder {
     private var discardSamples = false
     private let lock = NSLock()
     private(set) var isRecording = false
+    /// 最近一次開始錄音時 input node 嘅格式（除錯用）。
+    private(set) var lastInputDescription = ""
 
     /// - Parameter monitorOnly: 只係計音量（設定頁測試麥克風用），唔儲存聲音。
     func start(monitorOnly: Bool = false) throws {
@@ -38,10 +40,12 @@ final class AudioRecorder {
         if !inputDeviceUID.isEmpty, let deviceID = AudioDevices.deviceID(forUID: inputDeviceUID), let unit = input.audioUnit {
             _ = AudioDevices.select(deviceID, on: unit)
         }
-        let inputFormat = input.outputFormat(forBus: 0)
+        let inputFormat = input.inputFormat(forBus: 0)
         guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
             throw RecorderError.noInputDevice
         }
+        lastInputDescription = "\(Int(inputFormat.sampleRate)) Hz, \(inputFormat.channelCount) ch"
+        NSLog("CantoType recorder input: %@ device=%@", lastInputDescription, inputDeviceUID.isEmpty ? "default" : inputDeviceUID)
         converter = AVAudioConverter(from: inputFormat, to: targetFormat)
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) { [weak self] buffer, _ in

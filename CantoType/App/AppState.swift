@@ -288,9 +288,16 @@ final class AppState: ObservableObject {
 
     // MARK: - Pipeline
 
+    /// 上一次錄音會存喺 Application Support（方便去試驗室重播、查問題）。
+    static var lastRecordingURL: URL {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return support.appendingPathComponent("CantoType/last-recording.wav")
+    }
+
     private func process(_ clip: AudioClip) async {
         phase = .transcribing
         let started = Date()
+        try? clip.wavData().write(to: Self.lastRecordingURL, options: .atomic)
         do {
             let stats = clip.stats
             guard stats.peakDb > -55 else { throw TranscriptionError.tooQuiet(peakDb: stats.peakDb) }

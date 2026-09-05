@@ -156,16 +156,31 @@ def looks_garbled(text: str) -> bool:
     return "\ufffd" in text or re.search(r"(.)\1{4,}", text) is not None
 
 
-def transcribe_array(audio: np.ndarray, language: str | None, prompt: str | None, model: str | None = None) -> dict:
-    """`model` 非空就用另一個 Whisper repo（模型試驗室用）；mlx_whisper 會自己換模型。"""
+NO_PROMPT = object()
+
+
+def transcribe_array(audio: np.ndarray, language: str | None, prompt, model: str | None = None) -> dict:
+    """`model` 非空就用另一個 Whisper repo（模型試驗室用）；mlx_whisper 會自己換模型。
+
+    `prompt`：None → 伺服器預設句；NO_PROMPT → 完全唔用 prompt；其他 → 該字串。
+    temperature 固定 0：Whisper 預設遇到低信心會升溫重試（0.2…1.0），高溫出嚟嘅係亂碼
+    （例如「該Est補lang戰鬆自己嘅享受嚟失踷死」），對口述輸入嚟講寧願要一個低信心但正常嘅句子。
+    """
+    if prompt is NO_PROMPT:
+        initial_prompt = None
+    elif prompt is None or not str(prompt).strip():
+        initial_prompt = STATE["prompt"] or None
+    else:
+        initial_prompt = str(prompt)
     with WHISPER_LOCK:
         return mlx_whisper.transcribe(
             audio,
             path_or_hf_repo=model or STATE["whisper_model"],
             language=language or STATE["language"],
-            initial_prompt=prompt if prompt is not None else STATE["prompt"],
+            initial_prompt=initial_prompt,
             condition_on_previous_text=False,
             no_speech_threshold=STATE["no_speech_threshold"],
+            temperature=0.0,
             fp16=True,
         )
 
@@ -278,11 +293,18 @@ async def transcriptions(
         try:
             audio = normalize(decode_wav(data))
             result = transcribe_array(audio, language, prompt, override)
-            # prompt 太長／太怪會令 Whisper 完全唔出字或者出亂碼；咁就唔要 prompt 再試一次
-            text = (result.get("text") or "").strip()
-            if prompt and (not text or looks_garbled(text)) and float(np.abs(audio).mean()) > 1e-4:
-                say(f"[asr] {'empty' if not text else 'garbled'} with prompt, retrying without")
-                result = transcribe_array(audio, language, "", override)
+            # prompt 太長／太怪會令 Whisper 完全唔出字或者出亂碼；逐級退：自訂 prompt → 預設短句 → 完全冇 prompt
+            has_speech = float(np.abs(audio).mean()) > 1e-4
+            ladder = []
+            if prompt and prompt.strip():
+                ladder.append(("default prompt", None))
+            ladder.append(("no prompt", NO_PROMPT))
+            for label, fallback in ladder:
+                text = (result.get("text") or "").strip()
+                if not has_speech or (text and not looks_garbled(text)):
+                    break
+                say(f"[asr] {'empty' if not text else 'garbled'} output, retrying with {label}")
+                result = transcribe_array(audio, language, fallback, override)
                 result["prompt_dropped"] = True
             return result
         except Exception:  # noqa: BLE001  唔係 16k WAV 就交畀 ffmpeg 解碼
@@ -394,7 +416,7 @@ def main():
     say(f"啟動：pid {os.getpid()}，parent {args.parent_pid}，log {LOG_PATH}")
     say(f"載入 Whisper {STATE['whisper_model']} …")
     started = time.time()
-    transcribe_array(np.zeros(16000, dtype=np.float32), STATE["language"], STATE["prompt"])
+    transcribe_array(np.zeros(16000, dtype=np.float32), STATE["language"], None)
     say(f"Whisper 就緒（{time.time() - started:.1f} 秒）。監聽 http://{args.host}:{args.port}")
     load_llm_background()
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")

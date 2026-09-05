@@ -260,6 +260,22 @@ final class ModelLab: ObservableObject {
         }
     }
 
+    /// 載入 app 上一次真正輸入時嘅錄音。
+    func loadLastRecording() {
+        let url = AppState.lastRecordingURL
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            status = "仲未有錄音記錄（用快捷鍵講一句先）"
+            return
+        }
+        do {
+            clip = try AudioClip.load(url)
+            asrResults = [:]
+            status = ""
+        } catch {
+            status = "載入失敗：\(error.localizedDescription)"
+        }
+    }
+
     func loadFile() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.audio]
@@ -514,6 +530,9 @@ struct ModelLabView: View {
                     }
                     Button("載入音檔…") { lab.loadFile() }
                         .disabled(lab.isRecording)
+                    Button("上一次輸入嘅錄音") { lab.loadLastRecording() }
+                        .disabled(lab.isRecording)
+                        .help("app 每次快捷鍵輸入都會保留最後一段錄音，方便喺呢度重播同比較")
                     Button {
                         lab.play()
                     } label: {
@@ -630,6 +649,13 @@ struct ModelLabView: View {
         }
     }
 
+    /// 參考文字改咗都會即時重新計 CER，唔使重跑。
+    private func liveCER(_ result: ModelLab.RunResult) -> Double? {
+        let reference = lab.reference.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reference.isEmpty, result.error == nil, !result.text.isEmpty else { return nil }
+        return CER.compute(reference: reference, hypothesis: result.text)
+    }
+
     // MARK: Row
 
     private func candidateRow(
@@ -661,7 +687,7 @@ struct ModelLabView: View {
                             if result.ms > 0 {
                                 Text("\(result.ms) ms").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                             }
-                            if showCER, let cer = result.cer {
+                            if showCER, let cer = liveCER(result) {
                                 Text(String(format: "CER %.0f%%", cer * 100))
                                     .font(.caption.monospacedDigit()).bold()
                                     .foregroundStyle(cer < 0.1 ? .green : (cer < 0.25 ? .orange : .red))

@@ -12,26 +12,13 @@ enum SpeakerContext {
 }
 
 enum VocabularyProvider {
-    /// Whisper initial prompt：一句短嘅自然廣東話，唔要清單、唔要太長（實測長句會出亂碼）。
+    /// Whisper initial prompt：越短越安全。實測連「講者背景」都會令廣東話 fine-tune 對真人聲出空白，
+    /// 所以預設只係一句基本描述，加上用戶自己最多 6 個詞；講者背景交畀 LLM 處理。
     static func whisperPrompt(user: [String], context: String, techCorrection: Bool) -> String {
-        // 講者：取背景第一句（到第一個標點），最多 24 字
-        var role = context.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let cut = role.firstIndex(where: { "，,。；;（(".contains($0) }) {
-            role = String(role[..<cut])
-        }
-        role = String(role.prefix(24)).trimmingCharacters(in: .whitespaces)
-
-        var mentions = Array(user.prefix(6))
-        if techCorrection {
-            var seen = Set(mentions.map { $0.lowercased() })
-            for term in SpeakerContext.techAnchors where mentions.count < 8 {
-                if seen.insert(term.lowercased()).inserted { mentions.append(term) }
-            }
-        }
-
-        var sentence = role.isEmpty ? "以下係一段廣東話口語" : "以下係一位\(role) 講嘅廣東話"
+        let mentions = Array(user.prefix(6))
+        var sentence = "以下係一段廣東話口語"
         if !mentions.isEmpty {
-            sentence += "，會提到 \(mentions.joined(separator: "、")) 呢啲英文詞"
+            sentence += "，會提到 \(mentions.joined(separator: "、")) 呢啲詞"
         }
         sentence += "，用繁體中文記錄。"
         return sentence

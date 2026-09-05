@@ -321,7 +321,7 @@ enum Prompts {
             "7. 只輸出整理後嘅文字，唔要有任何前言後語。",
         ]
         if techCorrection {
-            lines.append("8. 英文技術詞語一律用標準寫法同大小寫，唔要翻譯成中文。辨識結果如果將英文詞聽錯成讀音相近嘅字，要改返做正確英文詞，例如：get hub→GitHub、sequel→SQL、post gres→PostgreSQL、Q 班／cube→Kubernetes、派森→Python、多卡→Docker、A P I→API、J son→JSON、red is→Redis。")
+            lines.append("8. 英文技術詞語一律用標準寫法同大小寫，唔要翻譯成中文。辨識結果如果將英文詞聽錯成讀音相近嘅字，要改返做正確英文詞，例如：get hub→GitHub、sequel→SQL、post gres→PostgreSQL、Q 班／cube→Kubernetes、派森→Python、多卡→Docker、A P I→API、J son→JSON、red is→Redis；講開 GitHub／code 嘅時候，report／Vebok／理 po→repo、P R→PR、common／卡米→commit、bran／班→branch。")
         }
         if !vocabulary.isEmpty {
             lines.append("")
