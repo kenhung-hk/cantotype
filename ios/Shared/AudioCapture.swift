@@ -35,10 +35,17 @@ final class AudioCapture {
         guard !isRecording else { return }
         let session = AVAudioSession.sharedInstance()
         do {
-            try session.setCategory(category, mode: .default, options: category == .playAndRecord ? [.duckOthers, .defaultToSpeaker, .allowBluetooth] : [.duckOthers])
+            // 背景（Action Button）錄音：一定要 mixWithOthers，唔可以 duckOthers——
+            // 唔可混音嘅 session 喺背景 activate 會失敗 '!int'（560557684，cannotInterruptOthers）
+            let options: AVAudioSession.CategoryOptions = category == .playAndRecord
+                ? [.mixWithOthers, .defaultToSpeaker, .allowBluetooth]
+                : [.duckOthers]
+            if session.category != category || !session.categoryOptions.isSuperset(of: options) {
+                try session.setCategory(category, mode: .default, options: options)
+            }
             try session.setActive(true)
         } catch {
-            // 鍵盤 extension 冇麥克風權限時會落到呢度
+            // 鍵盤 extension 冇麥克風權限、或者背景唔畀開始錄，會落到呢度
             throw CaptureError.sessionUnavailable(error.localizedDescription)
         }
         lock.lock()
