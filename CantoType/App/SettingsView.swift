@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var settings: AppSettings
+    @EnvironmentObject var sidecar: WhisperSidecar
 
     @State private var ollamaTestResult = ""
     @State private var testingOllama = false
@@ -58,18 +59,47 @@ struct SettingsView: View {
                     Text("完全 on-device，第一次會下載語言包（約 30 秒）。").font(.caption).foregroundStyle(.secondary)
                 }
             } else {
-                Section("HTTP 伺服器") {
+                Section("MLX Whisper 伺服器") {
+                    Toggle("由 CantoType 自動啟動本地伺服器（需要 uv）", isOn: $settings.manageSidecar)
+                    Picker("模型", selection: whisperModelSelection) {
+                        ForEach(WhisperModelPreset.allCases) { Text($0.label).tag($0.rawValue) }
+                        if WhisperModelPreset(rawValue: settings.whisperModel) == nil {
+                            Text("自訂：\(settings.whisperModel)").tag(settings.whisperModel)
+                        }
+                    }
+                    TextField("HuggingFace repo 或本地路徑", text: $settings.whisperModel)
+                        .font(.caption.monospaced())
+                    LabeledContent("狀態", value: sidecar.status.label)
+                    if !sidecar.recentLog.isEmpty {
+                        Text(sidecar.recentLog.suffix(3).joined(separator: "\n"))
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                    HStack {
+                        Button("重啟伺服器") { state.restartSidecar() }
+                        Text("第一次用新模型要下載（1.5 至 3 GB），期間會暫時用 Apple 語音。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Section("進階") {
                     TextField("網址", text: $settings.httpURL)
-                    TextField("模型名稱（可留空）", text: $settings.httpModel)
                     TextField("語言代碼", text: $settings.httpLanguage)
-                    Text("任何 OpenAI 相容嘅 /v1/audio/transcriptions 都用得。跟 project 嘅 server/whisper_server.py 用 mlx-whisper，可以載入廣東話 fine-tune 模型：\n  uv run server/whisper_server.py --model mlx-community/whisper-large-v3-turbo")
+                    TextField("model 欄位（大部分伺服器可留空）", text: $settings.httpModel)
+                    Text("任何 OpenAI 相容嘅 /v1/audio/transcriptions 都用得（whisper.cpp server、Speaches、SenseVoice wrapper）。網址唔係 localhost 就唔會自動啟動伺服器。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
                 }
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var whisperModelSelection: Binding<String> {
+        Binding(
+            get: { settings.whisperModel },
+            set: { settings.whisperModel = $0 }
+        )
     }
 
     private var polishTab: some View {
@@ -84,6 +114,7 @@ struct SettingsView: View {
             Section("Ollama") {
                 TextField("網址", text: $settings.ollamaHost)
                 TextField("模型", text: $settings.ollamaModel)
+                TextField("備用模型（主模型回應斬斷時用，可留空）", text: $settings.ollamaFallbackModel)
                 HStack {
                     Button(testingOllama ? "測試中…" : "測試連線") {
                         testingOllama = true

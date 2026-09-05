@@ -27,7 +27,7 @@ enum BackendKind: String, CaseIterable, Identifiable, Codable {
     var label: String {
         switch self {
         case .apple: return "Apple 內置語音（on-device）"
-        case .http: return "HTTP 伺服器（Whisper / SenseVoice）"
+        case .http: return "MLX Whisper（本地伺服器）"
         }
     }
 }
@@ -119,9 +119,12 @@ final class AppSettings: ObservableObject {
         static let httpURL = "httpURL"
         static let httpModel = "httpModel"
         static let httpLanguage = "httpLanguage"
+        static let whisperModel = "whisperModel"
+        static let manageSidecar = "manageSidecar"
         static let polishMode = "polishMode"
         static let ollamaHost = "ollamaHost"
         static let ollamaModel = "ollamaModel"
+        static let ollamaFallbackModel = "ollamaFallbackModel"
         static let hotkey = "hotkey"
         static let activation = "activation"
         static let restoreClipboard = "restoreClipboard"
@@ -137,9 +140,12 @@ final class AppSettings: ObservableObject {
     @Published var httpURL: String { didSet { defaults.set(httpURL, forKey: Keys.httpURL) } }
     @Published var httpModel: String { didSet { defaults.set(httpModel, forKey: Keys.httpModel) } }
     @Published var httpLanguage: String { didSet { defaults.set(httpLanguage, forKey: Keys.httpLanguage) } }
+    @Published var whisperModel: String { didSet { defaults.set(whisperModel, forKey: Keys.whisperModel) } }
+    @Published var manageSidecar: Bool { didSet { defaults.set(manageSidecar, forKey: Keys.manageSidecar) } }
     @Published var polishMode: PolishMode { didSet { defaults.set(polishMode.rawValue, forKey: Keys.polishMode) } }
     @Published var ollamaHost: String { didSet { defaults.set(ollamaHost, forKey: Keys.ollamaHost) } }
     @Published var ollamaModel: String { didSet { defaults.set(ollamaModel, forKey: Keys.ollamaModel) } }
+    @Published var ollamaFallbackModel: String { didSet { defaults.set(ollamaFallbackModel, forKey: Keys.ollamaFallbackModel) } }
     @Published var hotkey: HotkeyPreset { didSet { defaults.set(hotkey.rawValue, forKey: Keys.hotkey) } }
     @Published var activation: ActivationMode { didSet { defaults.set(activation.rawValue, forKey: Keys.activation) } }
     @Published var restoreClipboard: Bool { didSet { defaults.set(restoreClipboard, forKey: Keys.restoreClipboard) } }
@@ -149,14 +155,17 @@ final class AppSettings: ObservableObject {
 
     init() {
         let d = UserDefaults.standard
-        backend = BackendKind(rawValue: d.string(forKey: Keys.backend) ?? "") ?? .apple
+        backend = BackendKind(rawValue: d.string(forKey: Keys.backend) ?? "") ?? .http
         appleLocale = d.string(forKey: Keys.appleLocale) ?? "zh_HK"
         httpURL = d.string(forKey: Keys.httpURL) ?? "http://127.0.0.1:8787/v1/audio/transcriptions"
         httpModel = d.string(forKey: Keys.httpModel) ?? ""
         httpLanguage = d.string(forKey: Keys.httpLanguage) ?? "yue"
+        whisperModel = d.string(forKey: Keys.whisperModel) ?? WhisperModelPreset.defaultModel
+        manageSidecar = d.object(forKey: Keys.manageSidecar) as? Bool ?? true
         polishMode = PolishMode(rawValue: d.string(forKey: Keys.polishMode) ?? "") ?? .colloquial
         ollamaHost = d.string(forKey: Keys.ollamaHost) ?? "http://127.0.0.1:11434"
         ollamaModel = d.string(forKey: Keys.ollamaModel) ?? "qwen3:14b"
+        ollamaFallbackModel = d.string(forKey: Keys.ollamaFallbackModel) ?? "qwen2.5vl:7b"
         hotkey = HotkeyPreset(rawValue: d.string(forKey: Keys.hotkey) ?? "") ?? .rightOption
         activation = ActivationMode(rawValue: d.string(forKey: Keys.activation) ?? "") ?? .hold
         restoreClipboard = d.object(forKey: Keys.restoreClipboard) as? Bool ?? true
@@ -171,5 +180,40 @@ final class AppSettings: ObservableObject {
             .split(whereSeparator: { $0.isNewline || $0 == "," || $0 == "，" || $0 == "、" })
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
+    }
+}
+
+/// 常用 MLX Whisper 模型。任何 HuggingFace 上 MLX 格式嘅 Whisper repo 都可以手動輸入。
+enum WhisperModelPreset: String, CaseIterable, Identifiable {
+    case cantoneseTurbo = "Huan69/whisper-large-v3-turbo-cantonese-yue-english-mlx"
+    case largeV3 = "mlx-community/whisper-large-v3-mlx"
+    case largeV3Turbo = "mlx-community/whisper-large-v3-turbo"
+
+    static let defaultModel = WhisperModelPreset.cantoneseTurbo.rawValue
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .cantoneseTurbo: return "large-v3-turbo 廣東話＋英文 fine-tune（推薦）"
+        case .largeV3: return "large-v3（原版，最準但最慢）"
+        case .largeV3Turbo: return "large-v3-turbo（原版，快）"
+        }
+    }
+}
+
+extension AppSettings {
+    /// HTTP 網址係 localhost 先會由 app 自己管理伺服器。
+    var sidecarPort: Int? {
+        guard manageSidecar, backend == .http, let url = URL(string: httpURL),
+              let host = url.host(), ["127.0.0.1", "localhost", "::1"].contains(host)
+        else { return nil }
+        return url.port ?? 80
+    }
+}
+
+extension AppSettings {
+    var polishConfig: PolishConfig {
+        PolishConfig(host: ollamaHost, model: ollamaModel, fallbackModel: ollamaFallbackModel)
     }
 }

@@ -11,6 +11,7 @@ struct CantoTypeApp: App {
                 .environmentObject(state)
                 .environmentObject(state.settings)
                 .environmentObject(state.history)
+                .environmentObject(state.sidecar)
         } label: {
             Image(systemName: state.menuBarSymbol)
         }
@@ -20,6 +21,7 @@ struct CantoTypeApp: App {
             SettingsView()
                 .environmentObject(state)
                 .environmentObject(state.settings)
+                .environmentObject(state.sidecar)
         }
     }
 }

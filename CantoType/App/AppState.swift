@@ -47,6 +47,7 @@ final class AppState: ObservableObject {
 
     let settings = AppSettings.shared
     let history = HistoryStore()
+    let sidecar = WhisperSidecar()
 
     private let recorder = AudioRecorder()
     private let hotkey = HotkeyMonitor()
@@ -97,9 +98,16 @@ final class AppState: ObservableObject {
             .sink { [weak self] _ in Task { @MainActor in await self?.warmUpOllama() } }
             .store(in: &cancellables)
 
+        Publishers.CombineLatest4(settings.$backend, settings.$whisperModel, settings.$manageSidecar, settings.$httpURL)
+            .dropFirst()
+            .debounce(for: .seconds(0.8), scheduler: RunLoop.main)
+            .sink { [weak self] _ in Task { @MainActor in self?.syncSidecar() } }
+            .store(in: &cancellables)
+
         refreshPermissions()
         armHotkey()
         startPermissionPolling()
+        syncSidecar()
 
         Task { await warmUpApple() }
         Task { await warmUpOllama() }
@@ -112,6 +120,23 @@ final class AppState: ObservableObject {
     func shutdown() {
         hotkey.stop()
         permissionTimer?.invalidate()
+        sidecar.stop()
+    }
+
+    // MARK: - MLX Whisper sidecar
+
+    /// 設定係「MLX Whisper + localhost」就由 app 管理伺服器，否則關掉。
+    func syncSidecar() {
+        if let port = settings.sidecarPort {
+            sidecar.ensureRunning(model: settings.whisperModel, port: port, language: settings.httpLanguage)
+        } else {
+            sidecar.stop()
+        }
+    }
+
+    func restartSidecar() {
+        guard let port = settings.sidecarPort else { return }
+        sidecar.restart(model: settings.whisperModel, port: port, language: settings.httpLanguage)
     }
 
     func armHotkey() {
@@ -201,7 +226,13 @@ final class AppState: ObservableObject {
         phase = .transcribing
         let started = Date()
         do {
-            let backend = try currentBackend()
+            var backend = try currentBackend()
+            var backendNote = ""
+            // Whisper 伺服器仲喺載入（例如第一次下載模型）就先用 Apple 頂住
+            if settings.backend == .http, settings.sidecarPort != nil, !sidecar.status.isReady {
+                backend = appleBackend(for: settings.appleLocale)
+                backendNote = "（Whisper 未就緒，改用 Apple）"
+            }
             let raw = TranscriptCleaner.normalize(try await backend.transcribe(clip))
             guard !raw.isEmpty else { throw TranscriptionError.noResult }
 
@@ -212,8 +243,7 @@ final class AppState: ObservableObject {
                     raw,
                     mode: settings.polishMode,
                     vocabulary: settings.vocabularyList,
-                    host: settings.ollamaHost,
-                    model: settings.ollamaModel
+                    config: settings.polishConfig
                 )
             }
 
@@ -224,7 +254,7 @@ final class AppState: ObservableObject {
                 raw: raw,
                 polished: output,
                 duration: clip.duration,
-                backend: backend.displayName,
+                backend: backend.displayName + backendNote,
                 mode: settings.polishMode,
                 elapsed: Date().timeIntervalSince(started)
             ))
@@ -287,7 +317,7 @@ final class AppState: ObservableObject {
     }
 
     func warmUpOllama() async {
-        ollamaReachable = await polisher.warmUp(host: settings.ollamaHost, model: settings.ollamaModel)
+        ollamaReachable = await polisher.warmUp(config: settings.polishConfig)
     }
 
     /// 設定頁「測試連線」用。
@@ -301,8 +331,8 @@ final class AppState: ObservableObject {
         }
         let started = Date()
         do {
-            let sample = "呃 我今日想試一下語音輸入 即係 睇下佢係唔係識得聽廣東話"
-            let result = try await polisher.polish(sample, mode: settings.polishMode, vocabulary: settings.vocabularyList, host: settings.ollamaHost, model: settings.ollamaModel)
+            let sample = "呃 我覺得 K M同 K Y嗰邊 security可以做好啲 即係 睇下佢係唔係識得聽廣東話"
+            let result = try await polisher.polish(sample, mode: settings.polishMode, vocabulary: settings.vocabularyList, config: settings.polishConfig)
             let ms = Int(Date().timeIntervalSince(started) * 1000)
             return "正常（\(ms) ms）：\(result)"
         } catch {

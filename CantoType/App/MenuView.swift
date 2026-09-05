@@ -5,6 +5,7 @@ struct MenuView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var settings: AppSettings
     @EnvironmentObject var history: HistoryStore
+    @EnvironmentObject var sidecar: WhisperSidecar
 
     var body: some View {
         Text("狀態：\(state.phase.label)")
@@ -56,6 +57,15 @@ struct MenuView: View {
         }
         if settings.backend == .apple, !state.appleAssetStatus.isEmpty {
             Text("Apple 語音：\(state.appleAssetStatus)")
+        }
+        if settings.backend == .http, settings.sidecarPort != nil {
+            Text("MLX Whisper：\(sidecar.status.label)")
+            if case .starting = sidecar.status, !sidecar.lastLogLine.isEmpty {
+                Text("　" + truncated(sidecar.lastLogLine, 48))
+            }
+            if case .failed = sidecar.status {
+                Button("重啟 Whisper 伺服器") { state.restartSidecar() }
+            }
         }
         Divider()
 

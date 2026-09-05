@@ -6,6 +6,7 @@ enum CLIRunner {
     static let usage = """
     用法：
       CantoType --transcribe <音檔> [選項]
+      CantoType --polish "<文字>" [--mode colloquial|written] [--model qwen3:14b]
 
     選項：
       --backend apple|http      辨識引擎（預設 apple）
@@ -16,6 +17,7 @@ enum CLIRunner {
       --mode raw|colloquial|written   LLM 整理模式（預設 raw，即唔整理）
       --model qwen3:14b         Ollama 模型（預設 qwen3:14b）
       --ollama <網址>            Ollama 網址（預設 http://127.0.0.1:11434）
+      --fallback-model <名稱>    主模型回應斬斷時用嘅備用模型（預設 qwen2.5vl:7b）
 
     例：
       CantoType --transcribe ~/Desktop/test.wav --mode colloquial
@@ -24,7 +26,7 @@ enum CLIRunner {
     """
 
     static func shouldRun(_ args: [String]) -> Bool {
-        args.contains("--transcribe") || args.contains("--help") || args.contains("-h")
+        args.contains("--transcribe") || args.contains("--polish") || args.contains("--help") || args.contains("-h")
     }
 
     static func run(_ args: [String]) {
@@ -45,6 +47,9 @@ enum CLIRunner {
     }
 
     private static func execute(_ args: [String]) async -> Int32 {
+        if let text = value("--polish", in: args) {
+            return await polishOnly(text, args: args)
+        }
         guard let path = value("--transcribe", in: args) else {
             print(usage)
             return 2
@@ -52,8 +57,7 @@ enum CLIRunner {
         let localeId = value("--locale", in: args) ?? "zh_HK"
         let backendName = value("--backend", in: args) ?? "apple"
         let mode = PolishMode(rawValue: value("--mode", in: args) ?? "raw") ?? .raw
-        let ollamaModel = value("--model", in: args) ?? "qwen3:14b"
-        let ollamaHost = value("--ollama", in: args) ?? "http://127.0.0.1:11434"
+        let config = polishConfig(from: args)
         let httpURL = value("--url", in: args) ?? "http://127.0.0.1:8787/v1/audio/transcriptions"
 
         do {
@@ -85,7 +89,7 @@ enum CLIRunner {
 
             if mode != .raw {
                 let t1 = Date()
-                let polished = try await TextPolisher().polish(raw, mode: mode, vocabulary: [], host: ollamaHost, model: ollamaModel)
+                let polished = try await TextPolisher().polish(raw, mode: mode, vocabulary: [], config: config)
                 print("整理〔\(mode.label)〕（\(elapsed(since: t1))）：\(polished)")
             }
             return 0
@@ -93,6 +97,29 @@ enum CLIRunner {
             print("錯誤：\(error.localizedDescription)")
             return 1
         }
+    }
+
+    private static func polishOnly(_ text: String, args: [String]) async -> Int32 {
+        let mode = PolishMode(rawValue: value("--mode", in: args) ?? "colloquial") ?? .colloquial
+        let config = polishConfig(from: args)
+        print("原文：\(text)")
+        let started = Date()
+        do {
+            let polished = try await TextPolisher().polish(text, mode: mode, vocabulary: [], config: config)
+            print("整理〔\(mode.label)〕（\(elapsed(since: started))）：\(polished)")
+            return 0
+        } catch {
+            print("錯誤：\(error.localizedDescription)")
+            return 1
+        }
+    }
+
+    private static func polishConfig(from args: [String]) -> PolishConfig {
+        var config = PolishConfig.cliDefault
+        if let model = value("--model", in: args) { config.model = model }
+        if let host = value("--ollama", in: args) { config.host = host }
+        if let fallback = value("--fallback-model", in: args) { config.fallbackModel = fallback }
+        return config
     }
 
     private static func elapsed(since date: Date) -> String {

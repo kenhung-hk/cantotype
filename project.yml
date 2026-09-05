@@ -20,6 +20,8 @@ targets:
       - path: CantoType
         excludes:
           - "**/.DS_Store"
+      - path: server/whisper_server.py
+        buildPhase: resources
     info:
       path: CantoType/Info.plist
       properties:

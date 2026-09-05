@@ -30,7 +30,9 @@ from __future__ import annotations
 import argparse
 import io
 import os
+import signal
 import tempfile
+import threading
 import time
 import wave
 
@@ -121,6 +123,19 @@ async def transcriptions(
     return {"text": text, "language": result.get("language"), "elapsed_ms": elapsed_ms}
 
 
+def watch_parent(pid: int) -> None:
+    """CantoType app 唔喺度就自動退出，唔會留低孤兒 process。"""
+    def loop():
+        while True:
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                print("parent gone, exiting", flush=True)
+                os._exit(0)
+            time.sleep(2)
+    threading.Thread(target=loop, daemon=True).start()
+
+
 def main():
     global MODEL, LANGUAGE, PROMPT
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -129,7 +144,11 @@ def main():
     parser.add_argument("--prompt", default=DEFAULT_PROMPT, help="Whisper initial prompt；傳空字串可以關閉")
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--parent-pid", type=int, default=0, help="呢個 pid 消失就自動退出")
     args = parser.parse_args()
+    if args.parent_pid:
+        watch_parent(args.parent_pid)
+    signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
     MODEL, LANGUAGE, PROMPT = args.model, args.language, args.prompt
 
     print(f"載入模型 {MODEL} …", flush=True)

@@ -3,12 +3,14 @@ import Foundation
 enum PolishError: LocalizedError {
     case badHost
     case empty
+    case incomplete
     case server(Int, String)
 
     var errorDescription: String? {
         switch self {
         case .badHost: return "Ollama 網址無效"
         case .empty: return "LLM 冇回應內容"
+        case .incomplete: return "Ollama 回應中途斬斷"
         case .server(let code, let body): return "Ollama 回應 \(code)：\(body.prefix(160))"
         }
     }
@@ -22,13 +24,24 @@ struct OllamaClient {
         let content: String
     }
 
-    func chat(model: String, messages: [Message], think: Bool? = false, timeout: TimeInterval = 60) async throws -> String {
+    /// - Parameters:
+    ///   - think: `false` 關掉 Qwen3 thinking（快好多）；`nil` 唔傳呢個參數（畀唔支援 thinking 嘅模型用）。
+    func chat(
+        model: String,
+        messages: [Message],
+        think: Bool? = false,
+        temperature: Double = 0.1,
+        seed: Int? = nil,
+        timeout: TimeInterval = 60
+    ) async throws -> String {
+        var options: [String: Any] = ["temperature": temperature, "num_predict": 2048]
+        if let seed { options["seed"] = seed }
         var payload: [String: Any] = [
             "model": model,
             "messages": messages.map { ["role": $0.role, "content": $0.content] },
             "stream": false,
             "keep_alive": "30m",
-            "options": ["temperature": 0.1, "num_predict": 1024],
+            "options": options,
         ]
         if let think { payload["think"] = think }
 
@@ -44,7 +57,7 @@ struct OllamaClient {
 
         // 模型唔支援 thinking 開關 → 唔帶 think 再試一次
         if status == 400, think != nil, bodyText.localizedCaseInsensitiveContains("think") {
-            return try await chat(model: model, messages: messages, think: nil, timeout: timeout)
+            return try await chat(model: model, messages: messages, think: nil, temperature: temperature, seed: seed, timeout: timeout)
         }
         guard (200..<300).contains(status) else {
             throw PolishError.server(status, bodyText)
@@ -52,8 +65,12 @@ struct OllamaClient {
         struct Reply: Decodable {
             struct Msg: Decodable { let content: String }
             let message: Msg
+            let done: Bool?
         }
-        return try JSONDecoder().decode(Reply.self, from: data).message.content
+        let reply = try JSONDecoder().decode(Reply.self, from: data)
+        // Ollama 嘅 runner 有時會喺「英文字母緊貼中文字」嗰度中途死掉，回傳 done=false 嘅半截答案
+        guard reply.done ?? true else { throw PolishError.incomplete }
+        return reply.message.content
     }
 
     func isReachable() async -> Bool {
@@ -83,37 +100,71 @@ struct OllamaClient {
     }
 }
 
+struct PolishConfig {
+    var host: String
+    var model: String
+    /// 主模型回應斬斷時用嘅備用模型；留空就直接用原文。
+    var fallbackModel: String
+
+    static let cliDefault = PolishConfig(host: "http://127.0.0.1:11434", model: "qwen3:14b", fallbackModel: "qwen2.5vl:7b")
+}
+
 final class TextPolisher {
-    func polishOrFallback(_ raw: String, mode: PolishMode, vocabulary: [String], host: String, model: String) async -> String {
+    func polishOrFallback(_ raw: String, mode: PolishMode, vocabulary: [String], config: PolishConfig) async -> String {
         do {
-            return try await polish(raw, mode: mode, vocabulary: vocabulary, host: host, model: model)
+            return try await polish(raw, mode: mode, vocabulary: vocabulary, config: config)
         } catch {
             NSLog("CantoType polish failed, using raw transcript: %@", error.localizedDescription)
             return raw
         }
     }
 
-    func polish(_ raw: String, mode: PolishMode, vocabulary: [String], host: String, model: String) async throws -> String {
+    func polish(_ raw: String, mode: PolishMode, vocabulary: [String], config: PolishConfig) async throws -> String {
         guard mode != .raw else { return raw }
-        guard let hostURL = URL(string: host) else { throw PolishError.badHost }
+        guard let hostURL = URL(string: config.host) else { throw PolishError.badHost }
         let client = OllamaClient(host: hostURL)
-        let system = Prompts.system(mode: mode, vocabulary: vocabulary)
-        let reply = try await client.chat(
-            model: model,
-            messages: [.init(role: "system", content: system), .init(role: "user", content: raw)]
-        )
+        let input = InputNormalizer.prepare(raw)
+        let messages: [OllamaClient.Message] = [
+            .init(role: "system", content: Prompts.system(mode: mode, vocabulary: vocabulary)),
+            .init(role: "user", content: input),
+        ]
+
+        // 1) 主模型；2) 斬斷就換個 seed／溫度再試；3) 仍然斬斷就用備用模型
+        var attempts: [() async throws -> String] = [
+            { try await client.chat(model: config.model, messages: messages) },
+            { try await client.chat(model: config.model, messages: messages, temperature: 0.6, seed: 7) },
+        ]
+        let fallback = config.fallbackModel.trimmingCharacters(in: .whitespaces)
+        if !fallback.isEmpty, fallback != config.model {
+            attempts.append { try await client.chat(model: fallback, messages: messages) }
+        }
+
+        var reply = ""
+        var lastError: Error = PolishError.incomplete
+        for attempt in attempts {
+            do {
+                reply = try await attempt()
+                lastError = PolishError.empty
+                break
+            } catch PolishError.incomplete {
+                lastError = PolishError.incomplete
+                continue
+            }
+        }
+        if reply.isEmpty, case PolishError.incomplete = lastError { throw PolishError.incomplete }
+
         let cleaned = Self.sanitize(reply)
         guard !cleaned.isEmpty else { throw PolishError.empty }
         // 防止 LLM 亂加內容：長過原文太多就當失敗，用原文
-        if cleaned.count > raw.count * 3 + 40 { return raw }
+        if cleaned.count > input.count * 3 + 40 { return raw }
         return cleaned
     }
 
-    func warmUp(host: String, model: String) async -> Bool {
-        guard let hostURL = URL(string: host) else { return false }
+    func warmUp(config: PolishConfig) async -> Bool {
+        guard let hostURL = URL(string: config.host) else { return false }
         let client = OllamaClient(host: hostURL)
         guard await client.isReachable() else { return false }
-        await client.preload(model: model)
+        await client.preload(model: config.model)
         return true
     }
 
@@ -133,6 +184,30 @@ final class TextPolisher {
             result = String(result.dropFirst(open.count).dropLast(close.count))
         }
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// 送畀 LLM 之前先整理辨識結果，令模型容易處理（亦避開 Ollama 嘅字母緊貼中文 bug）。
+enum InputNormalizer {
+    static func prepare(_ text: String) -> String {
+        var result = text
+        // 逐個字母串埋一齊：「K M」→「KM」、「P P O」→「PPO」
+        if let regex = try? NSRegularExpression(pattern: "(?<![A-Za-z])[A-Z](?: [A-Za-z])+(?![A-Za-z])") {
+            let ns = result as NSString
+            var out = ""
+            var cursor = 0
+            for match in regex.matches(in: result, range: NSRange(location: 0, length: ns.length)) {
+                out += ns.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
+                out += ns.substring(with: match.range).replacingOccurrences(of: " ", with: "")
+                cursor = match.range.location + match.range.length
+            }
+            out += ns.substring(from: cursor)
+            result = out
+        }
+        // 英文／數字同中文之間留一個空格
+        result = result.replacingOccurrences(of: "(?<=[A-Za-z0-9])(?=\\p{Han})", with: " ", options: .regularExpression)
+        result = result.replacingOccurrences(of: "(?<=\\p{Han})(?=[A-Za-z0-9])", with: " ", options: .regularExpression)
+        return result
     }
 }
 
