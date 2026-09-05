@@ -62,6 +62,10 @@ STATE = {
     "language": DEFAULT_LANGUAGE,
     "prompt": DEFAULT_PROMPT,
     "no_speech_threshold": 0.75,
+    # 解碼策略：先 greedy；只有出現重複迴圈（compression ratio 高）先升溫重試。
+    # 唔會因為信心低（avg_logprob）而升溫——呢個 fine-tune 對正常廣東話都會報低信心，
+    # 升溫出嚟就係「該Est補lang戰鬆…」呢類亂碼。greedy 模式就連重複都唔重試。
+    "temperature": (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
     "llm_model": DEFAULT_LLM,
     "llm": None,
     "llm_tokenizer": None,
@@ -179,8 +183,10 @@ def transcribe_array(audio: np.ndarray, language: str | None, prompt, model: str
             language=language or STATE["language"],
             initial_prompt=initial_prompt,
             condition_on_previous_text=False,
-            no_speech_threshold=STATE["no_speech_threshold"],
-            temperature=0.0,
+            no_speech_threshold=None,
+            logprob_threshold=None,
+            compression_ratio_threshold=2.4,
+            temperature=STATE["temperature"],
             fp16=True,
         )
 
@@ -320,7 +326,10 @@ async def transcriptions(
                         language=language or STATE["language"],
                         initial_prompt=prompt if prompt is not None else STATE["prompt"],
                         condition_on_previous_text=False,
-                        no_speech_threshold=STATE["no_speech_threshold"],
+                        no_speech_threshold=None,
+                        logprob_threshold=None,
+                        compression_ratio_threshold=2.4,
+                        temperature=STATE["temperature"],
                         fp16=True,
                     )
             finally:
@@ -396,6 +405,7 @@ def main():
     parser.add_argument("--language", default=DEFAULT_LANGUAGE, help="Whisper 預設語言代碼（yue / zh / en）")
     parser.add_argument("--prompt", default=DEFAULT_PROMPT, help="Whisper initial prompt；傳空字串可以關閉")
     parser.add_argument("--no-speech-threshold", type=float, default=0.75, help="Whisper 判斷「冇人講嘢」嘅門檻，越高越寬鬆")
+    parser.add_argument("--greedy", action="store_true", help="Whisper 固定 temperature 0，重複迴圈都唔重試")
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--parent-pid", type=int, default=0, help="呢個 pid 消失就自動退出")
@@ -407,6 +417,7 @@ def main():
         language=args.language,
         prompt=args.prompt,
         no_speech_threshold=args.no_speech_threshold,
+        temperature=0.0 if args.greedy else (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
     )
     STATE["parent_pid"] = args.parent_pid
     if args.parent_pid:
