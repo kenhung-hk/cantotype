@@ -75,6 +75,9 @@ struct KeyboardView: View {
             ) { engine.toggleRecording() }
             toolbarChip(icon: "wand.and.stars", title: "改寫", tint: .purple, disabled: engine.phase != .idle) { engine.rephrase() }
             toolbarChip(icon: "character.book.closed", title: engine.modeLabel, tint: .gray, disabled: false) { engine.cycleMode() }
+            if engine.lastResult != nil, engine.phase == .idle {
+                toolbarChip(icon: "arrow.down.doc", title: "貼上次", tint: .gray, disabled: false) { engine.insertLastResult() }
+            }
             Spacer(minLength: 4)
             HStack(spacing: 6) {
                 if engine.phase == .recording {

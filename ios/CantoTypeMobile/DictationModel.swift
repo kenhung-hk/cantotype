@@ -72,6 +72,7 @@ final class DictationModel: ObservableObject {
 
     func startFromKeyboard() {
         config.markAppOpened()
+        DebugLog.log("app", "startFromKeyboard (phase=\(phase.label))")
         cameFromKeyboard = true
         if phase != .recording { toggleRecording() }
     }
@@ -99,6 +100,7 @@ final class DictationModel: ObservableObject {
     /// 返去叫我哋出嚟嘅 app（例如 Notes）。用 UIApplication 嘅 suspend，個人 app 用冇問題。
     private func returnToPreviousApp() {
         cameFromKeyboard = false
+        DebugLog.log("app", "suspending to return to previous app")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             UIControl().sendAction(#selector(URLSessionTask.suspend), to: UIApplication.shared, for: nil)
         }
@@ -124,8 +126,10 @@ final class DictationModel: ObservableObject {
                 do {
                     try capture.start()
                     phase = .recording
+                    DebugLog.log("app", "recording started (fromKeyboard=\(cameFromKeyboard) autoStop=\(autoStop))")
                     startSilenceWatch()
                 } catch {
+                    DebugLog.log("app", "recording failed: \(error.localizedDescription)")
                     phase = .error(error.localizedDescription)
                 }
             }
@@ -136,6 +140,7 @@ final class DictationModel: ObservableObject {
         phase = .sending
         do {
             let result = try await CantoTypeClient(config: config).dictate(wav: wav, mode: mode)
+            DebugLog.log("app", "dictate ok raw=\(result.raw.prefix(40)) text=\(result.text.prefix(40)) fromKeyboard=\(cameFromKeyboard)")
             rawText = result.raw
             text = result.text
             timing = "辨識 \(result.asr_ms) ms · 整理 \(result.llm_ms) ms" + ((result.note?.isEmpty ?? true) ? "" : " · \(result.note!)")
@@ -147,11 +152,12 @@ final class DictationModel: ObservableObject {
                 if cameFromKeyboard {
                     // 交返鍵盤自動插入，然後彈返上一個 app
                     config.storePendingInsert(text)
-                    timing += " · 返去原本 app 會自動插入"
+                    timing += " · 已交返鍵盤：返去原本 app 撳入文字框就會自動插入（或者按鍵盤頂「貼上次」）"
                     returnToPreviousApp()
                 }
             }
         } catch {
+            DebugLog.log("app", "dictate failed: \(error.localizedDescription)")
             phase = .error(error.localizedDescription)
         }
     }

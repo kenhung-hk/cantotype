@@ -446,7 +446,8 @@ def system_prompt(mode: str, vocabulary: list[str], speaker_context: str | None 
     else:
         lines += [
             "你係一個語音輸入嘅文字整理器。用戶用廣東話講嘢，語音辨識會轉成文字。你嘅任務：將辨識結果整理成乾淨、可以直接貼上使用嘅文字，但保留廣東話口語寫法。",
-            "", "例子：", "輸入：呃 我今日唔得閒 即係 你哋自己搞掂佢先啦 然後 聽日再同我講", "輸出：我今日唔得閒，你哋自己搞掂佢先啦，聽日再同我講。", "", "規則：",
+            "", "例子：", "輸入：呃 我今日唔得閒 即係 你哋自己搞掂佢先啦 然後 聽日再同我講", "輸出：我今日唔得閒，你哋自己搞掂佢先啦，聽日再同我講。",
+            "輸入：係呀 唔係真係 work 呀", "輸出：係呀，唔係真係 work 呀？", "", "規則：",
             "1. 保留廣東話口語用字（唔、係、嘅、咩、喺、佢、點解、我哋），唔要轉做書面語。",
         ] + COMMON_RULES
     if tech_correction and mode != "rephrase":
@@ -464,6 +465,11 @@ def normalize_input(text: str) -> str:
     return text
 
 
+def looks_like_chat_reply(text: str) -> bool:
+    """LLM 唔整理反而答你（「我明白晒你嘅要求」）嘅特徵。"""
+    return any(k in text for k in ("明白晒你嘅要求", "我會按照", "你嘅規則", "整理語音輸入", "有什么我可以", "有咩可以幫", "As an AI", "I understand your"))
+
+
 def sanitize_llm(text: str, original: str) -> str:
     text = THINK_RE.sub("", text).strip()
     if text.startswith("```"):
@@ -474,7 +480,8 @@ def sanitize_llm(text: str, original: str) -> str:
     for open_, close in (("「", "」"), ("“", "”"), ('"', '"')):
         if len(text) > 2 and text.startswith(open_) and text.endswith(close):
             text = text[len(open_):-len(close)].strip()
-    if not text or len(text) > len(original) * 3 + 40:
+    # 太長（借題發揮）或者似係對話回應 → 用原文
+    if not text or len(text) > max(len(original) * 2, len(original) + 12) or looks_like_chat_reply(text):
         return original
     return text
 
@@ -482,6 +489,9 @@ def sanitize_llm(text: str, original: str) -> str:
 def polish_text(text: str, mode: str, model: str | None, vocabulary: list[str], speaker_context: str | None, tech_correction: bool) -> tuple[str, int]:
     """回傳 (整理後文字, 毫秒)。mode: colloquial | written | rephrase | raw"""
     if mode == "raw" or not text.strip():
+        return text, 0
+    # 幾個字冇嘢可以整理，LLM 反而會當係對話去答你
+    if mode != "rephrase" and len(re.sub(r"[\s，。？！、,.?!]", "", text)) <= 4:
         return text, 0
     prepared = normalize_input(text) if mode != "rephrase" else text
     messages = [{"role": "system", "content": system_prompt(mode, vocabulary, speaker_context, tech_correction)}, {"role": "user", "content": prepared}]
@@ -558,7 +568,7 @@ async def dictate_endpoint(
             except Exception as exc:  # noqa: BLE001
                 log.error("dictate polish failed\n%s", traceback.format_exc())
                 note = f"整理失敗，用原文：{type(exc).__name__}"
-    say(f"[dictate asr {asr_ms} ms + llm {llm_ms} ms] {text[:80]}")
+    say(f"[dictate asr {asr_ms} ms + llm {llm_ms} ms] raw={raw[:60]!r} → {text[:80]}")
     return {"raw": raw, "text": text, "asr_ms": asr_ms, "llm_ms": llm_ms, "note": note, "model": model or STATE["llm_model"]}
 
 

@@ -5,6 +5,7 @@ import UIKit
 final class KeyboardViewController: UIInputViewController {
     private let engine = KeyboardEngine()
     private var host: UIHostingController<KeyboardView>?
+    private var pollTimer: Timer?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -66,11 +67,22 @@ final class KeyboardViewController: UIInputViewController {
         let height = view.heightAnchor.constraint(equalToConstant: KeyboardView.totalHeight)
         height.priority = UILayoutPriority(999)
         height.isActive = true
+        engine.refresh()
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         engine.refresh()
+        pollTimer?.invalidate()
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.engine.pollPending() }
+        }
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        pollTimer?.invalidate()
+        pollTimer = nil
     }
 
     override func textDidChange(_ textInput: UITextInput?) {

@@ -24,6 +24,7 @@ final class RemoteConfig {
         static let pendingInsert = "pendingInsert"
         static let pendingInsertAt = "pendingInsertAt"
         static let appOpenedAt = "appOpenedAt"
+        static let lastResult = "lastResult"
     }
 
     /// 例：http://100.100.32.60:8787 或 http://kenhungs-mac-studio.tail1e4efd.ts.net:8787
@@ -94,15 +95,23 @@ final class RemoteConfig {
     func storePendingInsert(_ text: String) {
         defaults.set(text, forKey: Keys.pendingInsert)
         defaults.set(Date().timeIntervalSince1970, forKey: Keys.pendingInsertAt)
+        defaults.set(text, forKey: Keys.lastResult)
     }
 
+    /// 5 分鐘內有效；攞走之後唔會再自動插入（但 lastResult 仍然可以手動貼）
     func consumePendingInsert() -> String? {
         guard let text = defaults.string(forKey: Keys.pendingInsert), !text.isEmpty else { return nil }
         let at = defaults.double(forKey: Keys.pendingInsertAt)
         defaults.removeObject(forKey: Keys.pendingInsert)
         defaults.removeObject(forKey: Keys.pendingInsertAt)
-        guard Date().timeIntervalSince1970 - at < 90 else { return nil }
+        guard Date().timeIntervalSince1970 - at < 300 else { return nil }
         return text
+    }
+
+    /// 上一次 app 錄音嘅結果（鍵盤「貼上上次」用）
+    var lastResult: String? {
+        get { defaults.string(forKey: Keys.lastResult) }
+        set { defaults.set(newValue, forKey: Keys.lastResult) }
     }
 
     /// 由 Mac 設定頁嘅 QR code（JSON {"url","token"}）套用設定。

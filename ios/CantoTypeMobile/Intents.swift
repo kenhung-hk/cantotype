@@ -10,6 +10,7 @@ struct StartDictationIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
+        DebugLog.log("intent", "StartDictationIntent.perform")
         // app 可能剛剛先啟動，model 未必即刻有；等一陣再試
         for _ in 0..<20 {
             if let model = DictationModel.shared {

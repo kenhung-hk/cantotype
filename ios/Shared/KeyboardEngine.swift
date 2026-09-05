@@ -18,6 +18,8 @@ final class KeyboardEngine: ObservableObject {
     /// 跟 host app 嘅 keyboardAppearance；nil 就跟系統
     @Published var darkAppearance: Bool?
     @Published var mode: String = RemoteConfig.shared.mode
+    /// app 上一次錄音嘅結果，可以手動貼
+    @Published var lastResult: String?
 
     var proxyProvider: () -> UITextDocumentProxy? = { nil }
     var advanceKeyboard: () -> Void = {}
@@ -56,8 +58,11 @@ final class KeyboardEngine: ObservableObject {
         if let pending = config.consumePendingInsert(), let proxy {
             proxy.insertText(pending)
             hasText = true
+            DebugLog.log("kb", "inserted pending text (\(pending.count) chars)")
             show("✓ 已插入")
         }
+        lastResult = config.lastResult
+        DebugLog.log("kb", "refresh fullAccess=\(hasFullAccess) configured=\(config.isConfigured) proxy=\(proxy != nil) pending=\(config.lastResult != nil)")
         if let appearance = proxy?.keyboardAppearance {
             darkAppearance = appearance == .dark ? true : (appearance == .light ? false : nil)
         }
@@ -99,6 +104,28 @@ final class KeyboardEngine: ObservableObject {
     func toggleSymbols() { symbols.toggle() }
     func globe() { advanceKeyboard() }
 
+    /// 鍵盤每秒都 poll 一次，app 錄完返嚟就算鍵盤一直開住都會插入
+    func pollPending() {
+        guard let proxy = proxyProvider(), let pending = config.consumePendingInsert() else { return }
+        proxy.insertText(pending)
+        hasText = true
+        lastResult = config.lastResult
+        DebugLog.log("kb", "inserted pending text via poll (\(pending.count) chars)")
+        show("✓ 已插入")
+    }
+
+    /// 手動貼上 app 上一次嘅結果
+    func insertLastResult() {
+        guard let text = config.lastResult, !text.isEmpty else {
+            show("未有上一次結果")
+            return
+        }
+        proxyProvider()?.insertText(text)
+        _ = config.consumePendingInsert()
+        hasText = true
+        show("✓ 已貼上上次結果")
+    }
+
     // MARK: 錄音 → Mac
 
     func toggleRecording() {
@@ -129,8 +156,10 @@ final class KeyboardEngine: ObservableObject {
                 try capture.start()
                 phase = .recording
                 status = "錄音中…再按一下停止"
+                DebugLog.log("kb", "in-keyboard recording started")
             } catch {
                 // iOS 唔畀鍵盤錄音：跳去 app 錄，錄完會自動返嚟插入
+                DebugLog.log("kb", "in-keyboard recording failed: \(error.localizedDescription)")
                 phase = .idle
                 hopToApp()
             }
@@ -142,10 +171,12 @@ final class KeyboardEngine: ObservableObject {
     private func hopToApp() {
         let requested = Date()
         let strategy = openHostApp()
+        DebugLog.log("kb", "hop to app via \(strategy)")
         status = "嘗試跳去 CantoType…"
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(1.5))
             guard let self else { return }
+            DebugLog.log("kb", "hop verified=\(self.config.appOpened(since: requested))")
             if self.config.appOpened(since: requested) {
                 self.show("已跳去 CantoType 錄音，講完會自動返嚟插入")
             } else {
@@ -160,6 +191,7 @@ final class KeyboardEngine: ObservableObject {
         status = "傳去 Mac 辨識…"
         do {
             let result = try await CantoTypeClient(config: config).dictate(wav: wav, mode: mode)
+            DebugLog.log("kb", "dictate ok raw=\(result.raw.prefix(40)) text=\(result.text.prefix(40))")
             if result.text.isEmpty {
                 show("聽唔到內容，試下大聲啲")
             } else {
@@ -168,6 +200,7 @@ final class KeyboardEngine: ObservableObject {
                 show("✓ \(result.asr_ms + result.llm_ms) ms" + ((result.note?.isEmpty ?? true) ? "" : " · \(result.note!)"))
             }
         } catch {
+            DebugLog.log("kb", "dictate failed: \(error.localizedDescription)")
             show(error.localizedDescription)
         }
         phase = .idle

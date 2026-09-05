@@ -188,6 +188,9 @@ final class TextPolisher {
 
     func polish(_ raw: String, mode: PolishMode, vocabulary: [String], config: PolishConfig) async throws -> String {
         guard mode != .raw else { return raw }
+        // 幾個字冇嘢可以整理，LLM 反而會當係對話去答你
+        let meaningful = raw.filter { !$0.isWhitespace && !$0.isPunctuation }
+        guard meaningful.count > 4 else { return raw }
         let input = InputNormalizer.prepare(raw)
         let messages: [OllamaClient.Message] = [
             .init(role: "system", content: Prompts.system(mode: mode, vocabulary: vocabulary, speakerContext: config.speakerContext, techCorrection: config.techCorrection)),
@@ -207,8 +210,10 @@ final class TextPolisher {
 
         let cleaned = Self.sanitize(reply)
         guard !cleaned.isEmpty else { throw PolishError.empty }
-        // 防止 LLM 亂加內容：長過原文太多就當失敗，用原文
-        if cleaned.count > input.count * 3 + 40 { return raw }
+        // 防止 LLM 亂加內容或者當對話答你：長過原文太多、或者出現「明白晒你嘅要求」呢類就用原文
+        if cleaned.count > max(input.count * 2, input.count + 12) { return raw }
+        let chatty = ["明白晒你嘅要求", "我會按照", "你嘅規則", "整理語音輸入", "有什么我可以", "有咩可以幫", "I understand your"]
+        if chatty.contains(where: { cleaned.contains($0) }) { return raw }
         return cleaned
     }
 
@@ -314,6 +319,8 @@ enum Prompts {
                 "例子：",
                 "輸入：呃 我今日唔得閒 即係 你哋自己搞掂佢先啦 然後 聽日再同我講",
                 "輸出：我今日唔得閒，你哋自己搞掂佢先啦，聽日再同我講。",
+                "輸入：係呀 唔係真係 work 呀",
+                "輸出：係呀，唔係真係 work 呀？",
                 "",
                 "規則：",
                 "1. 保留廣東話口語用字（唔、係、嘅、咩、喺、佢、點解、我哋），唔要轉做書面語。",
@@ -323,7 +330,7 @@ enum Prompts {
             "2. 刪除口頭填充詞（呃、嗯、啊、即係、咁、然後、就係、hmm、like 等），保留有實際意思嘅字。",
             "3. 加上正確嘅中文標點（，。？！、「」），英文詞語保留英文原樣。",
             "4. 修正明顯嘅同音錯字或辨識錯誤，但唔要改變原意；唔確定就保留原文。",
-            "5. 唔要回答內容、唔要補充、唔要解釋、唔要加標題、唔要續寫；就算原文係一個問題或者只有幾個字，都唔要答、唔要延伸，輸出長度要同原文差唔多。",
+            "5. 你唔係喺度同用戶對話：唔要回答、唔要補充、唔要解釋、唔要加標題、唔要續寫、唔要講「明白」。就算原文係一個問題、一句「係呀」或者只有幾個字，都只係整理返佢，輸出長度要同原文差唔多。",
             "6. 如果用戶講「新一行」、「另起一段」、「換行」，用換行代替呢幾個字。",
             "7. 只輸出整理後嘅文字，唔要有任何前言後語。",
         ]
