@@ -60,12 +60,19 @@ app = FastAPI(title="CantoType MLX Server")
 API_TOKEN = ""  # --token 設定咗先會檢查；Tailscale 已經係私人網絡，token 係多一重保險
 
 
+def is_loopback(request: Request) -> bool:
+    host = (request.client.host if request.client else "") or ""
+    return host in ("127.0.0.1", "::1", "localhost") or host.startswith("::ffff:127.")
+
+
 @app.middleware("http")
 async def require_token(request: Request, call_next):
-    if API_TOKEN and request.url.path != "/health":
+    # token 只係用嚟保護遠端（Tailscale／局域網）連入；本機嘅 Mac app 唔使帶 token
+    if API_TOKEN and request.url.path != "/health" and not is_loopback(request):
         header = request.headers.get("authorization", "")
         query = request.query_params.get("token", "")
         if header != f"Bearer {API_TOKEN}" and query != API_TOKEN:
+            log.warning("401 %s from %s (auth header %s)", request.url.path, request.client.host if request.client else "?", "present" if header else "missing")
             return JSONResponse(status_code=401, content={"error": {"message": "token 唔對", "type": "unauthorized"}})
     return await call_next(request)
 
@@ -402,7 +409,7 @@ DEFAULT_SPEAKER_CONTEXT = "香港嘅 full stack developer，日常講廣東話�
 
 TECH_RULE = ("8. 英文技術詞語一律用標準寫法同大小寫，唔要翻譯成中文。辨識結果如果將英文詞聽錯成讀音相近嘅字，要改返做正確英文詞，例如："
              "get hub→GitHub、sequel→SQL、post gres→PostgreSQL、Q 班／cube→Kubernetes、派森→Python、多卡→Docker、A P I→API、J son→JSON、red is→Redis；"
-             "講開 GitHub／code 嘅時候，report／Vebok／理 po→repo、P R→PR、common／卡米→commit、bran／班→branch；威迫／vibe 曲→vibe code、威迫 coding→vibe coding、ng run／N G run→ng run（Angular CLI）。")
+             "講開 GitHub／code 嘅時候，report／Vebok／理 po→repo、P R→PR、common／卡米→commit、bran／班→branch；威迫／vibe 曲→vibe code、威迫 coding→vibe coding、ng run／N G run→ng run（Angular CLI）、stable／tail scale／tail sale→Tailscale、Kithub／Gitub→GitHub、bond alert／bot 阿 lert→bot alert、summer review→summary review、K8s／k 8 s→k8s。")
 
 COMMON_RULES = [
     "2. 刪除口頭填充詞（呃、嗯、啊、即係、咁、然後、就係、hmm、like 等），保留有實際意思嘅字。",

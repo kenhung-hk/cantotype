@@ -172,6 +172,8 @@ final class AppState: ObservableObject {
 
     /// 設定係「MLX Whisper + localhost」就由 app 管理伺服器，否則關掉。
     func syncSidecar() {
+        HTTPTranscriptionBackend.authToken = settings.sidecarToken
+        OpenAIChatClient.authToken = settings.sidecarToken
         if let port = settings.sidecarPort {
             sidecar.ensureRunning(
                 whisperModel: settings.whisperModel,

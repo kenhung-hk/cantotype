@@ -3,6 +3,9 @@ import Foundation
 /// 任何 OpenAI 相容嘅 `/v1/audio/transcriptions` 伺服器：
 /// server/whisper_server.py（mlx-whisper）、whisper.cpp server、Speaches 等。
 final class HTTPTranscriptionBackend: TranscriptionBackend {
+    /// 遠端存取開咗時伺服器要 token；本機 loopback 其實唔使，但帶埗最穩陣。
+    static var authToken: String?
+
     let url: URL
     let model: String
     let language: String
@@ -30,6 +33,9 @@ final class HTTPTranscriptionBackend: TranscriptionBackend {
         request.httpMethod = "POST"
         request.timeoutInterval = timeout
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        if let token = HTTPTranscriptionBackend.authToken, !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
 
         var body = Data()
         func field(_ name: String, _ value: String) {

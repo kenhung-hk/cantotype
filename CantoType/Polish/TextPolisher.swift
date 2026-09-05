@@ -21,6 +21,7 @@ enum PolishError: LocalizedError {
 /// OpenAI 相容 `/v1/chat/completions`：CantoType 嘅 MLX 伺服器、mlx_lm.server、LM Studio 都用得。
 struct OpenAIChatClient {
     let baseURL: URL
+    static var authToken: String?
 
     func chat(model: String, messages: [OllamaClient.Message], temperature: Double = 0.1, maxTokens: Int = 2048, timeout: TimeInterval = 90) async throws -> String {
         let payload: [String: Any] = [
@@ -34,6 +35,9 @@ struct OpenAIChatClient {
         request.httpMethod = "POST"
         request.timeoutInterval = timeout
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let token = OpenAIChatClient.authToken, !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -324,7 +328,7 @@ enum Prompts {
             "7. 只輸出整理後嘅文字，唔要有任何前言後語。",
         ]
         if techCorrection {
-            lines.append("8. 英文技術詞語一律用標準寫法同大小寫，唔要翻譯成中文。辨識結果如果將英文詞聽錯成讀音相近嘅字，要改返做正確英文詞，例如：get hub→GitHub、sequel→SQL、post gres→PostgreSQL、Q 班／cube→Kubernetes、派森→Python、多卡→Docker、A P I→API、J son→JSON、red is→Redis；講開 GitHub／code 嘅時候，report／Vebok／理 po→repo、P R→PR、common／卡米→commit、bran／班→branch；威迫／vibe 曲→vibe code、威迫 coding→vibe coding、ng run／N G run→ng run（Angular CLI）。")
+            lines.append("8. 英文技術詞語一律用標準寫法同大小寫，唔要翻譯成中文。辨識結果如果將英文詞聽錯成讀音相近嘅字，要改返做正確英文詞，例如：get hub→GitHub、sequel→SQL、post gres→PostgreSQL、Q 班／cube→Kubernetes、派森→Python、多卡→Docker、A P I→API、J son→JSON、red is→Redis；講開 GitHub／code 嘅時候，report／Vebok／理 po→repo、P R→PR、common／卡米→commit、bran／班→branch；威迫／vibe 曲→vibe code、威迫 coding→vibe coding、ng run／N G run→ng run（Angular CLI）、stable／tail scale→Tailscale、Kithub／Gitub→GitHub、bond alert→bot alert、summer review→summary review。")
         }
         if !vocabulary.isEmpty {
             lines.append("")
