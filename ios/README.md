@@ -36,9 +36,16 @@ make launch     # 開 app
 3. 再入 CantoType 鍵盤 → 開 **允許完整存取**（鍵盤要用網絡連 Mac）
 4. 打字時按 🌐 切去 CantoType 鍵盤：🎤 按一下錄、再按一下停，文字會插入；✨ 將游標前後嘅文字交 Gemma 改寫
 
+## 鍵盤 🎤 嘅流程
+
+1. 鍵盤先試自己錄（iOS 對鍵盤 extension 嘅麥克風好嚴，可能唔畀）。
+2. 錄唔到就自動跳去 CantoType app，app 一開即刻錄；講完靜 1.3 秒自動停（一直冇聲 8 秒亦停）。
+3. App 傳去 Mac 辨識＋整理，將結果放入 App Group，然後自動彈返原本個 app（用 UIApplication suspend，個人 app 用冇問題）。
+4. 鍵盤再出現時即刻將文字插入。設定可以改成「按 🎤 一定跳去 app」或者關掉自動停。
+
 ## 已知限制
 
-- **鍵盤 extension 錄音**：iOS 對鍵盤 extension 嘅麥克風權限好嚴。鍵盤會先試直接錄；如果 iOS 唔畀，會提示你開 CantoType app 錄音，結果自動複製到剪貼簿再貼上。（要真機先試得出，模擬器唔準。）
+- 鍵盤跳去 app 靠 responder chain 叫 `openURL:`，係 iOS 一直容忍嘅做法但唔係公開 API；唔得就會提示你自己開 app，返嚟一樣會自動插入。
 - 改寫只影響 `documentContext` 拿得到嘅文字（大約係游標附近一段），長文要分段。
 - Info.plist 開咗 `NSAllowsArbitraryLoads`，因為 Tailscale 嘅 100.x 地址係 HTTP 而唔屬於 iOS 定義嘅「本地網絡」。想要 HTTPS 可以用 `tailscale serve` 反向代理 8787。
 - App Groups（`group.com.kenhung.cantotype`）用嚟俾 app 同鍵盤共用設定；Xcode 自動簽名會幫你喺 developer 帳戶開。

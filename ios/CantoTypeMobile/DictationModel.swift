@@ -26,6 +26,13 @@ final class DictationModel: ObservableObject {
     @Published var timing = ""
     @Published var connection = ""
     @Published var cameFromKeyboard = false
+    @Published var recordInApp: Bool { didSet { config.recordInApp = recordInApp } }
+    @Published var autoStop: Bool { didSet { config.autoStop = autoStop } }
+
+    private var speechStarted = false
+    private var lastLoudAt = Date()
+    private var recordStartedAt = Date()
+    private var silenceTimer: Timer?
 
     // 設定（App Group）
     @Published var serverURL: String { didSet { config.serverURL = serverURL } }
@@ -45,18 +52,57 @@ final class DictationModel: ObservableObject {
         dictateModel = config.dictateModel
         rephraseModel = config.rephraseModel
         vocabulary = config.vocabulary
+        recordInApp = config.recordInApp
+        autoStop = config.autoStop
         capture.onLevel = { [weak self] value in
-            Task { @MainActor in self?.level = value }
+            Task { @MainActor in
+                guard let self else { return }
+                self.level = value
+                if value > 0.36 {
+                    self.speechStarted = true
+                    self.lastLoudAt = Date()
+                }
+            }
         }
     }
 
+    /// 由鍵盤跳過嚟：即刻開始錄；靜音自動停；完成後將文字交返鍵盤並彈返上一個 app。
     func startFromKeyboard() {
         cameFromKeyboard = true
         if phase != .recording { toggleRecording() }
     }
 
+    private func startSilenceWatch() {
+        silenceTimer?.invalidate()
+        speechStarted = false
+        recordStartedAt = Date()
+        lastLoudAt = Date()
+        guard cameFromKeyboard, autoStop else { return }
+        silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.capture.isRecording else { return }
+                let now = Date()
+                let quietFor = now.timeIntervalSince(self.lastLoudAt)
+                let total = now.timeIntervalSince(self.recordStartedAt)
+                // 講過嘢之後靜 1.3 秒就停；一直冇聲 8 秒都停
+                if (self.speechStarted && quietFor > 1.3 && total > 0.8) || (!self.speechStarted && total > 8) {
+                    self.toggleRecording()
+                }
+            }
+        }
+    }
+
+    /// 返去叫我哋出嚟嘅 app（例如 Notes）。用 UIApplication 嘅 suspend，個人 app 用冇問題。
+    private func returnToPreviousApp() {
+        cameFromKeyboard = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            UIControl().sendAction(#selector(URLSessionTask.suspend), to: UIApplication.shared, for: nil)
+        }
+    }
+
     func toggleRecording() {
         if capture.isRecording {
+            silenceTimer?.invalidate()
             let clip = capture.stop()
             level = 0
             guard clip.seconds >= 0.4 else {
@@ -74,6 +120,7 @@ final class DictationModel: ObservableObject {
                 do {
                     try capture.start()
                     phase = .recording
+                    startSilenceWatch()
                 } catch {
                     phase = .error(error.localizedDescription)
                 }
@@ -93,6 +140,12 @@ final class DictationModel: ObservableObject {
             } else {
                 UIPasteboard.general.string = text
                 phase = .done
+                if cameFromKeyboard {
+                    // 交返鍵盤自動插入，然後彈返上一個 app
+                    config.storePendingInsert(text)
+                    timing += " · 返去原本 app 會自動插入"
+                    returnToPreviousApp()
+                }
             }
         } catch {
             phase = .error(error.localizedDescription)

@@ -52,6 +52,12 @@ final class KeyboardEngine: ObservableObject {
     func refresh() {
         hasFullAccess = fullAccessProvider()
         let proxy = proxyProvider()
+        // app 錄完返嚟：自動插入
+        if let pending = config.consumePendingInsert(), let proxy {
+            proxy.insertText(pending)
+            hasText = true
+            show("✓ 已插入")
+        }
         if let appearance = proxy?.keyboardAppearance {
             darkAppearance = appearance == .dark ? true : (appearance == .light ? false : nil)
         }
@@ -115,21 +121,29 @@ final class KeyboardEngine: ObservableObject {
                 show("要開「允許完整存取」先可以連 Mac")
                 return
             }
+            if config.recordInApp {
+                hopToApp()
+                return
+            }
             do {
                 try capture.start()
                 phase = .recording
                 status = "錄音中…再按一下停止"
             } catch {
-                // iOS 唔畀鍵盤錄音嘅情況
+                // iOS 唔畀鍵盤錄音：跳去 app 錄，錄完會自動返嚟插入
                 phase = .idle
-                if openHostApp() {
-                    show("已開 CantoType app 錄音，錄完會複製到剪貼簿")
-                } else {
-                    show("iOS 唔畀鍵盤錄音：請開 CantoType app 錄音，結果會自動複製")
-                }
+                hopToApp()
             }
         default:
             break
+        }
+    }
+
+    private func hopToApp() {
+        if openHostApp() {
+            show("已跳去 CantoType 錄音，講完會自動返嚟插入")
+        } else {
+            show("iOS 唔畀鍵盤開 app：請自己開 CantoType 錄音，返嚟會自動插入")
         }
     }
 

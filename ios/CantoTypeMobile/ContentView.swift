@@ -52,6 +52,9 @@ struct DictateView: View {
                 if model.phase == .recording {
                     LevelBars(level: model.level)
                 }
+                if model.cameFromKeyboard, model.phase == .recording {
+                    Text("由鍵盤跳過嚟：講完停 1.3 秒會自動送去 Mac，然後自動返去原本 app").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                }
                 Text(model.phase.label)
                     .font(.callout)
                     .foregroundStyle(isError ? .red : .secondary)
@@ -156,6 +159,12 @@ struct SettingsScreen: View {
                 }
                 Section("常用詞彙（每行一個）") {
                     TextEditor(text: $model.vocabulary).frame(minHeight: 80)
+                }
+                Section("鍵盤錄音方式") {
+                    Toggle("按 🎤 一定跳去 CantoType app 錄", isOn: $model.recordInApp)
+                    Toggle("跳去 app 錄時，靜音 1.3 秒自動停", isOn: $model.autoStop)
+                    Text("iOS 對鍵盤 extension 錄音好嚴。跳去 app 錄完，會自動彈返原本個 app 並插入文字。")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Section("鍵盤") {
                     KeyboardView(engine: previewEngine)

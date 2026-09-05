@@ -19,6 +19,10 @@ final class RemoteConfig {
         static let rephraseModel = "rephraseModel"
         static let vocabulary = "vocabulary"
         static let holdToTalk = "holdToTalk"
+        static let recordInApp = "recordInApp"
+        static let autoStop = "autoStop"
+        static let pendingInsert = "pendingInsert"
+        static let pendingInsertAt = "pendingInsertAt"
     }
 
     /// 例：http://100.100.32.60:8787 或 http://kenhungs-mac-studio.tail1e4efd.ts.net:8787
@@ -60,7 +64,36 @@ final class RemoteConfig {
         set { defaults.set(newValue, forKey: Keys.holdToTalk) }
     }
 
+    /// true = 鍵盤按 🎤 一定跳去 app 錄；false = 鍵盤先試自己錄，錄唔到先跳 app
+    var recordInApp: Bool {
+        get { defaults.object(forKey: Keys.recordInApp) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Keys.recordInApp) }
+    }
+
+    /// 由鍵盤跳過去 app 錄音時，靜音 1.3 秒自動停
+    var autoStop: Bool {
+        get { defaults.object(forKey: Keys.autoStop) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Keys.autoStop) }
+    }
+
     var isConfigured: Bool { URL(string: serverURL)?.host != nil }
+
+    // MARK: app → 鍵盤 交接
+
+    /// App 錄完、Mac 整理完，將文字放低；鍵盤再出現時會自動插入（90 秒內有效）。
+    func storePendingInsert(_ text: String) {
+        defaults.set(text, forKey: Keys.pendingInsert)
+        defaults.set(Date().timeIntervalSince1970, forKey: Keys.pendingInsertAt)
+    }
+
+    func consumePendingInsert() -> String? {
+        guard let text = defaults.string(forKey: Keys.pendingInsert), !text.isEmpty else { return nil }
+        let at = defaults.double(forKey: Keys.pendingInsertAt)
+        defaults.removeObject(forKey: Keys.pendingInsert)
+        defaults.removeObject(forKey: Keys.pendingInsertAt)
+        guard Date().timeIntervalSince1970 - at < 90 else { return nil }
+        return text
+    }
 
     /// 由 Mac 設定頁嘅 QR code（JSON {"url","token"}）套用設定。
     @discardableResult

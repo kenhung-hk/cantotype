@@ -12,15 +12,20 @@ final class KeyboardViewController: UIInputViewController {
         engine.advanceKeyboard = { [weak self] in self?.advanceToNextInputMode() }
         engine.fullAccessProvider = { [weak self] in self?.hasFullAccess ?? false }
         engine.openHostApp = { [weak self] in
-            // 鍵盤 extension 一般唔准開 URL；試一下，唔得就叫用戶自己開 app
+            // 鍵盤 extension 冇 UIApplication；沿 responder chain 搵到 host 嘅 UIApplication 再叫 openURL:
             guard let self, let url = URL(string: "cantotype://record") else { return false }
+            let selector = NSSelectorFromString("openURL:")
             var responder: UIResponder? = self
             while let current = responder {
-                if let application = current as? UIApplication {
-                    application.open(url)
+                if current.responds(to: selector), !(current is UIInputViewController) {
+                    _ = current.perform(selector, with: url)
                     return true
                 }
                 responder = current.next
+            }
+            if let context = self.extensionContext {
+                context.open(url, completionHandler: nil)
+                return true
             }
             return false
         }
