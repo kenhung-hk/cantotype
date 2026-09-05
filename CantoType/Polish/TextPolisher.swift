@@ -79,9 +79,10 @@ struct OllamaClient {
         think: Bool? = false,
         temperature: Double = 0.1,
         seed: Int? = nil,
+        maxTokens: Int = 2048,
         timeout: TimeInterval = 60
     ) async throws -> String {
-        var options: [String: Any] = ["temperature": temperature, "num_predict": 2048]
+        var options: [String: Any] = ["temperature": temperature, "num_predict": maxTokens]
         if let seed { options["seed"] = seed }
         var payload: [String: Any] = [
             "model": model,
@@ -189,13 +190,15 @@ final class TextPolisher {
             .init(role: "user", content: input),
         ]
 
+        // 輸出應該同原文差唔多長；上限按原文長度計，防止 LLM 借題發揮寫一大段（試過 7 個字變 35 秒嘅文章）
+        let maxTokens = min(2048, max(48, input.count * 3 + 24))
         let reply: String
         switch config.provider {
         case .mlx:
             guard let base = URL(string: config.mlxBaseURL) else { throw PolishError.badHost }
-            reply = try await OpenAIChatClient(baseURL: base).chat(model: config.mlxModel, messages: messages, timeout: config.requestTimeout)
+            reply = try await OpenAIChatClient(baseURL: base).chat(model: config.mlxModel, messages: messages, maxTokens: maxTokens, timeout: config.requestTimeout)
         case .ollama:
-            reply = try await polishWithOllama(messages: messages, config: config)
+            reply = try await polishWithOllama(messages: messages, config: config, maxTokens: maxTokens)
         }
 
         let cleaned = Self.sanitize(reply)
@@ -206,16 +209,16 @@ final class TextPolisher {
     }
 
     /// Ollama：1) 主模型；2) 斬斷就換個 seed／溫度再試；3) 仍然斬斷就用備用模型
-    private func polishWithOllama(messages: [OllamaClient.Message], config: PolishConfig) async throws -> String {
+    private func polishWithOllama(messages: [OllamaClient.Message], config: PolishConfig, maxTokens: Int) async throws -> String {
         guard let hostURL = URL(string: config.ollamaHost) else { throw PolishError.badHost }
         let client = OllamaClient(host: hostURL)
         var attempts: [() async throws -> String] = [
-            { try await client.chat(model: config.ollamaModel, messages: messages, timeout: config.requestTimeout) },
-            { try await client.chat(model: config.ollamaModel, messages: messages, temperature: 0.6, seed: 7, timeout: config.requestTimeout) },
+            { try await client.chat(model: config.ollamaModel, messages: messages, maxTokens: maxTokens, timeout: config.requestTimeout) },
+            { try await client.chat(model: config.ollamaModel, messages: messages, temperature: 0.6, seed: 7, maxTokens: maxTokens, timeout: config.requestTimeout) },
         ]
         let fallback = config.ollamaFallbackModel.trimmingCharacters(in: .whitespaces)
         if !fallback.isEmpty, fallback != config.ollamaModel {
-            attempts.append { try await client.chat(model: fallback, messages: messages, timeout: config.requestTimeout) }
+            attempts.append { try await client.chat(model: fallback, messages: messages, maxTokens: maxTokens, timeout: config.requestTimeout) }
         }
         for attempt in attempts {
             do {
@@ -316,12 +319,12 @@ enum Prompts {
             "2. 刪除口頭填充詞（呃、嗯、啊、即係、咁、然後、就係、hmm、like 等），保留有實際意思嘅字。",
             "3. 加上正確嘅中文標點（，。？！、「」），英文詞語保留英文原樣。",
             "4. 修正明顯嘅同音錯字或辨識錯誤，但唔要改變原意；唔確定就保留原文。",
-            "5. 唔要回答內容、唔要補充、唔要解釋、唔要加標題；就算原文係一個問題，都唔要答，只係整理佢。",
+            "5. 唔要回答內容、唔要補充、唔要解釋、唔要加標題、唔要續寫；就算原文係一個問題或者只有幾個字，都唔要答、唔要延伸，輸出長度要同原文差唔多。",
             "6. 如果用戶講「新一行」、「另起一段」、「換行」，用換行代替呢幾個字。",
             "7. 只輸出整理後嘅文字，唔要有任何前言後語。",
         ]
         if techCorrection {
-            lines.append("8. 英文技術詞語一律用標準寫法同大小寫，唔要翻譯成中文。辨識結果如果將英文詞聽錯成讀音相近嘅字，要改返做正確英文詞，例如：get hub→GitHub、sequel→SQL、post gres→PostgreSQL、Q 班／cube→Kubernetes、派森→Python、多卡→Docker、A P I→API、J son→JSON、red is→Redis；講開 GitHub／code 嘅時候，report／Vebok／理 po→repo、P R→PR、common／卡米→commit、bran／班→branch。")
+            lines.append("8. 英文技術詞語一律用標準寫法同大小寫，唔要翻譯成中文。辨識結果如果將英文詞聽錯成讀音相近嘅字，要改返做正確英文詞，例如：get hub→GitHub、sequel→SQL、post gres→PostgreSQL、Q 班／cube→Kubernetes、派森→Python、多卡→Docker、A P I→API、J son→JSON、red is→Redis；講開 GitHub／code 嘅時候，report／Vebok／理 po→repo、P R→PR、common／卡米→commit、bran／班→branch；威迫／vibe 曲→vibe code、威迫 coding→vibe coding、ng run／N G run→ng run（Angular CLI）。")
         }
         if !vocabulary.isEmpty {
             lines.append("")
