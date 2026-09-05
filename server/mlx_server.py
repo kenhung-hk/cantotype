@@ -51,7 +51,7 @@ from starlette.concurrency import run_in_threadpool
 import mlx_whisper
 
 DEFAULT_WHISPER = "Huan69/whisper-large-v3-turbo-cantonese-yue-english-mlx-int8"
-DEFAULT_LLM = "mlx-community/Qwen3-8B-4bit"
+DEFAULT_LLM = "mlx-community/gemma-3-12b-it-4bit"
 DEFAULT_LANGUAGE = "yue"
 # 用繁體廣東話做 initial prompt，Whisper 會傾向出繁體同口語寫法
 DEFAULT_PROMPT = "以下係一段廣東話口語，用繁體中文記錄。"

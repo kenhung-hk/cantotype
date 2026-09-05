@@ -75,7 +75,7 @@ Menubar → 「模型試驗室…」（⌘L）。錄一段（或者載入音檔�
 
 ## LLM 整理
 
-預設 MLX `mlx-community/Qwen3-8B-4bit`（thinking 關掉，greedy），一句約 1 秒，同 Whisper 用同一個伺服器。真人聲測試中 8B 比 14B 更忠於原句（14B 偶然會將「我想」改成「我唔想」）。設定可以換 14B、Gemma 3 或者任何 mlx-community 嘅 instruct 模型。
+預設 MLX `mlx-community/gemma-3-12b-it-4bit`（greedy），一句約 1.5 至 2 秒，同 Whisper 用同一個伺服器。開發用語嘅修正 Gemma 3 明顯最準（Kithub→GitHub、bond alert→bot alert、summer review→summary review 都改得返，Qwen3 8B／14B 改唔到）；Qwen3 8B 快一倍但錯得多，14B 偶然會將「我想」改成「我唔想」。設定可以換任何 mlx-community 嘅 instruct 模型。
 
 Ollama 仍然係一個選項，但唔推薦：Qwen3 用 `think: false` 時，Ollama runner 遇到「英文字母緊貼中文字」（`K Y嗰邊`）會中途死機回傳半截答案（0.31 同 0.33 都係）。揀 Ollama 時 app 會先正規化輸入、斬斷就換 seed 重試、再用備用模型頂住。
 

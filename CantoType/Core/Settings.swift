@@ -307,13 +307,13 @@ enum LLMModelPreset: String, CaseIterable, Identifiable {
     case cantoneseQwen2_7b = "hyperkit/Qwen2-Cantonese-7B-Instruct-mlx"
     case cantoneseLLMChat7b = "hyperkit/CantoneseLLMChat-v1.0-7B-mlx"
 
-    static let defaultModel = LLMModelPreset.qwen3_8b.rawValue
+    static let defaultModel = LLMModelPreset.gemma3_12b.rawValue
 
     var id: String { rawValue }
 
     var selectedByDefault: Bool {
         switch self {
-        case .qwen3_14b, .qwen3_8b: return true
+        case .gemma3_12b, .qwen3_8b: return true
         default: return false
         }
     }
@@ -321,12 +321,12 @@ enum LLMModelPreset: String, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .qwen3_14b: return "Qwen3 14B 4-bit（約 8 GB，偶然會改句意）"
-        case .qwen3_8b: return "Qwen3 8B 4-bit（預設，快，約 5 GB）"
+        case .qwen3_8b: return "Qwen3 8B 4-bit（快，約 5 GB）"
         case .qwen3_4b: return "Qwen3 4B 4-bit（最快，約 2.5 GB）"
         case .qwen3_32b: return "Qwen3 32B 4-bit（約 18 GB）"
         case .qwen3_30bA3bInstruct: return "Qwen3 30B-A3B Instruct 2507 4-bit（MoE，快，約 17 GB）"
         case .qwen3_30bA3b: return "Qwen3 30B-A3B 4-bit（MoE，約 17 GB）"
-        case .gemma3_12b: return "Gemma 3 12B it 4-bit（約 8 GB）"
+        case .gemma3_12b: return "Gemma 3 12B it 4-bit（預設，約 8 GB，開發用語最準）"
         case .gemma3_27b: return "Gemma 3 27B it 4-bit（約 16 GB）"
         case .qwen25_14b: return "Qwen2.5 14B Instruct 4-bit（約 8 GB）"
         case .mistralSmall: return "Mistral Small 3.2 24B 4-bit（約 14 GB）"
