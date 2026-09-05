@@ -22,7 +22,7 @@ final class KeyboardEngine: ObservableObject {
     var proxyProvider: () -> UITextDocumentProxy? = { nil }
     var advanceKeyboard: () -> Void = {}
     var fullAccessProvider: () -> Bool = { false }
-    var openHostApp: () -> Bool = { false }
+    var openHostApp: () -> String = { "none" }
 
     private let config = RemoteConfig.shared
     private let capture = AudioCapture()
@@ -140,10 +140,18 @@ final class KeyboardEngine: ObservableObject {
     }
 
     private func hopToApp() {
-        if openHostApp() {
-            show("已跳去 CantoType 錄音，講完會自動返嚟插入")
-        } else {
-            show("iOS 唔畀鍵盤開 app：請自己開 CantoType 錄音，返嚟會自動插入")
+        let requested = Date()
+        let strategy = openHostApp()
+        status = "嘗試跳去 CantoType…"
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.5))
+            guard let self else { return }
+            if self.config.appOpened(since: requested) {
+                self.show("已跳去 CantoType 錄音，講完會自動返嚟插入")
+            } else {
+                // 跳唔到：iOS 唔畀鍵盤開 app。最穩陣係 Action Button／Shortcut 開「CantoType 錄音」
+                self.show("iOS 唔畀鍵盤開 app（\(strategy)）。用 Action Button 或 Shortcut「CantoType 錄音」，返嚟會自動插入")
+            }
         }
     }
 

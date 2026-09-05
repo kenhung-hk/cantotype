@@ -23,6 +23,7 @@ final class RemoteConfig {
         static let autoStop = "autoStop"
         static let pendingInsert = "pendingInsert"
         static let pendingInsertAt = "pendingInsertAt"
+        static let appOpenedAt = "appOpenedAt"
     }
 
     /// 例：http://100.100.32.60:8787 或 http://kenhungs-mac-studio.tail1e4efd.ts.net:8787
@@ -79,6 +80,15 @@ final class RemoteConfig {
     var isConfigured: Bool { URL(string: serverURL)?.host != nil }
 
     // MARK: app → 鍵盤 交接
+
+    /// app 由 URL／Intent 開咗錄音就記低時間，鍵盤用嚟驗證有冇真係跳到
+    func markAppOpened() {
+        defaults.set(Date().timeIntervalSince1970, forKey: Keys.appOpenedAt)
+    }
+
+    func appOpened(since date: Date) -> Bool {
+        defaults.double(forKey: Keys.appOpenedAt) >= date.timeIntervalSince1970 - 0.5
+    }
 
     /// App 錄完、Mac 整理完，將文字放低；鍵盤再出現時會自動插入（90 秒內有效）。
     func storePendingInsert(_ text: String) {

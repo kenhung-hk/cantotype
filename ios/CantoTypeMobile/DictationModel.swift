@@ -54,6 +54,7 @@ final class DictationModel: ObservableObject {
         vocabulary = config.vocabulary
         recordInApp = config.recordInApp
         autoStop = config.autoStop
+        DictationModel.shared = self
         capture.onLevel = { [weak self] value in
             Task { @MainActor in
                 guard let self else { return }
@@ -67,7 +68,10 @@ final class DictationModel: ObservableObject {
     }
 
     /// 由鍵盤跳過嚟：即刻開始錄；靜音自動停；完成後將文字交返鍵盤並彈返上一個 app。
+    static weak var shared: DictationModel?
+
     func startFromKeyboard() {
+        config.markAppOpened()
         cameFromKeyboard = true
         if phase != .recording { toggleRecording() }
     }

@@ -43,9 +43,16 @@ make launch     # 開 app
 3. App 傳去 Mac 辨識＋整理，將結果放入 App Group，然後自動彈返原本個 app（用 UIApplication suspend，個人 app 用冇問題）。
 4. 鍵盤再出現時即刻將文字插入。設定可以改成「按 🎤 一定跳去 app」或者關掉自動停。
 
+## 最穩陣：Action Button／Shortcut
+
+iOS 26 唔畀鍵盤 extension 開 app（鍵盤會試三個方法並驗證，跳唔到會話你知）。Apple 正式支援嘅路係 App Intent：
+
+- iOS 設定 → **Action Button** → 捷徑 → 揀 **「CantoType 錄音」**。按一下即錄，講完自動送去 Mac、自動返去原本 app，鍵盤自動插入。
+- 或者 Shortcuts app 加「CantoType 錄音」動作，放去 Back Tap、Lock Screen、Siri（「用 CantoType 錄音」）。
+
 ## 已知限制
 
-- 鍵盤跳去 app 靠 responder chain 叫 `openURL:`，係 iOS 一直容忍嘅做法但唔係公開 API；唔得就會提示你自己開 app，返嚟一樣會自動插入。
+- 鍵盤直接開 app：iOS 26 已封，只保留嘗試。
 - 改寫只影響 `documentContext` 拿得到嘅文字（大約係游標附近一段），長文要分段。
 - Info.plist 開咗 `NSAllowsArbitraryLoads`，因為 Tailscale 嘅 100.x 地址係 HTTP 而唔屬於 iOS 定義嘅「本地網絡」。想要 HTTPS 可以用 `tailscale serve` 反向代理 8787。
 - App Groups（`group.com.kenhung.cantotype`）用嚟俾 app 同鍵盤共用設定；Xcode 自動簽名會幫你喺 developer 帳戶開。

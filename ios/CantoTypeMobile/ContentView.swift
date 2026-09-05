@@ -163,7 +163,7 @@ struct SettingsScreen: View {
                 Section("鍵盤錄音方式") {
                     Toggle("按 🎤 一定跳去 CantoType app 錄", isOn: $model.recordInApp)
                     Toggle("跳去 app 錄時，靜音 1.3 秒自動停", isOn: $model.autoStop)
-                    Text("iOS 對鍵盤 extension 錄音好嚴。跳去 app 錄完，會自動彈返原本個 app 並插入文字。")
+                    Text("iOS 對鍵盤 extension 錄音好嚴，亦可能唔畀鍵盤開 app。最穩陣：iOS 設定 → Action Button → 捷徑 → 揀「CantoType 錄音」（或者用 Shortcuts 建一個「開啟 URL cantotype://record」）。按 Action Button 即錄，講完自動送去 Mac、自動返去原本 app，鍵盤會自動插入。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section("鍵盤") {

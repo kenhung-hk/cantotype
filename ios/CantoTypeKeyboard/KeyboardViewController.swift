@@ -12,22 +12,41 @@ final class KeyboardViewController: UIInputViewController {
         engine.advanceKeyboard = { [weak self] in self?.advanceToNextInputMode() }
         engine.fullAccessProvider = { [weak self] in self?.hasFullAccess ?? false }
         engine.openHostApp = { [weak self] in
-            // 鍵盤 extension 冇 UIApplication；沿 responder chain 搵到 host 嘅 UIApplication 再叫 openURL:
-            guard let self, let url = URL(string: "cantotype://record") else { return false }
+            // 鍵盤 extension 冇公開 API 開 app；逐個試，回傳用咗邊招（真正有冇開到由 KeyboardEngine 驗證）
+            guard let self, let url = URL(string: "cantotype://record") else { return "no-url" }
+            var attempted: [String] = []
+
+            // 1) extensionContext.open（文件話只支援 Today widget，但有版本畀鍵盤開自己嘅 container app）
+            if let context = self.extensionContext {
+                context.open(url) { success in
+                    if !success { NSLog("CantoType keyboard: extensionContext.open failed") }
+                }
+                attempted.append("ctx")
+            }
+            // 2) UIApplication.sharedApplication（extension process 內部其實有一個）
+            if let appClass = NSClassFromString("UIApplication") as? NSObject.Type,
+               let shared = appClass.value(forKey: "sharedApplication") as? NSObject {
+                let open = NSSelectorFromString("openURL:options:completionHandler:")
+                if shared.responds(to: open) {
+                    _ = shared.perform(open, with: url, with: [:] as NSDictionary)
+                    attempted.append("shared")
+                } else if shared.responds(to: NSSelectorFromString("openURL:")) {
+                    _ = shared.perform(NSSelectorFromString("openURL:"), with: url)
+                    attempted.append("shared-legacy")
+                }
+            }
+            // 3) responder chain
             let selector = NSSelectorFromString("openURL:")
-            var responder: UIResponder? = self
+            var responder: UIResponder? = self.next
             while let current = responder {
-                if current.responds(to: selector), !(current is UIInputViewController) {
+                if current.responds(to: selector) {
                     _ = current.perform(selector, with: url)
-                    return true
+                    attempted.append("chain:\(type(of: current))")
+                    break
                 }
                 responder = current.next
             }
-            if let context = self.extensionContext {
-                context.open(url, completionHandler: nil)
-                return true
-            }
-            return false
+            return attempted.isEmpty ? "none" : attempted.joined(separator: "+")
         }
 
         let host = UIHostingController(rootView: KeyboardView(engine: engine))
