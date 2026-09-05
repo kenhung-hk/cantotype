@@ -43,12 +43,16 @@ make launch     # 開 app
 3. App 傳去 Mac 辨識＋整理，將結果放入 App Group，然後自動彈返原本個 app（用 UIApplication suspend，個人 app 用冇問題）。
 4. 鍵盤再出現時即刻將文字插入。設定可以改成「按 🎤 一定跳去 app」或者關掉自動停。
 
-## 最穩陣：Action Button／Shortcut
+## 建議用法：Action Button 背景錄音（唔跳 app）
 
-iOS 26 唔畀鍵盤 extension 開 app（鍵盤會試三個方法並驗證，跳唔到會話你知）。Apple 正式支援嘅路係 App Intent：
+iOS 26 唔畀鍵盤 extension 錄音，亦唔畀鍵盤開 app；由 app 開完再退場又會返主畫面。所以正式流程係 App Intent **喺背景錄**：
 
-- iOS 設定 → **Action Button** → 捷徑 → 揀 **「CantoType 錄音」**。按一下即錄，講完自動送去 Mac、自動返去原本 app，鍵盤自動插入。
-- 或者 Shortcuts app 加「CantoType 錄音」動作，放去 Back Tap、Lock Screen、Siri（「用 CantoType 錄音」）。
+1. iOS 設定 → **Action Button** → 捷徑 → **「CantoType 錄音」**（先開一次 CantoType app 授權麥克風）。
+2. 喺 Notes 之類撳入文字框，鍵盤係 CantoType 鍵盤。
+3. 按 Action Button：「嘟」一聲開始喺背景錄，**Notes 同鍵盤一直喺前面**；講完停 1.3 秒自動停（再按一次即刻停），「嘟」一聲送去 Mac。
+4. 鍵盤每秒 poll 一次，文字返嚟即刻插入（亦可以按鍵盤頂「貼上次」）。
+
+用到 `UIBackgroundModes: audio`，Action Button 會顯示 Intent 回傳嘅一句狀態。「CantoType 開 app 錄音」係另一個 Intent，會開 app 畫面錄。
 
 ## 已知限制
 

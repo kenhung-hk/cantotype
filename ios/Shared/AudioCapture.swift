@@ -19,6 +19,12 @@ final class AudioCapture {
     var onLevel: ((Float) -> Void)?
 
     private let engine = AVAudioEngine()
+    private let category: AVAudioSession.Category
+
+    init(category: AVAudioSession.Category = .record) {
+        self.category = category
+    }
+
     private let targetFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true)!
     private var converter: AVAudioConverter?
     private var samples: [Int16] = []
@@ -29,7 +35,7 @@ final class AudioCapture {
         guard !isRecording else { return }
         let session = AVAudioSession.sharedInstance()
         do {
-            try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
+            try session.setCategory(category, mode: .default, options: category == .playAndRecord ? [.duckOthers, .defaultToSpeaker, .allowBluetooth] : [.duckOthers])
             try session.setActive(true)
         } catch {
             // 鍵盤 extension 冇麥克風權限時會落到呢度

@@ -40,6 +40,10 @@
 	<string>掃描 Mac 上 CantoType 設定頁嘅 QR code，自動填好伺服器網址同 token。</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>CantoType 需要用麥克風錄低你講嘅廣東話，再傳去你部 Mac 轉成文字。</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
