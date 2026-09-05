@@ -18,6 +18,8 @@ final class MLXSidecar: ObservableObject {
         let llmError: String?
         let pid: Int32?
         let parentPid: Int32?
+        let host: String?
+        let tokenRequired: Bool
 
         /// 伺服器聲稱嘅 parent（上一個 app）已經唔存在，而且唔係我 → 係孤兒，唔應該接管。
         var isOrphan: Bool {
@@ -39,6 +41,8 @@ final class MLXSidecar: ObservableObject {
     private var wantedWhisper = ""
     private var wantedLLM = "none"
     private var wantedLanguage = "yue"
+    private var wantedHost = "127.0.0.1"
+    private var wantedToken = ""
     private var launchedAt: Date?
     private var quickFailures = 0
 
@@ -66,17 +70,17 @@ final class MLXSidecar: ObservableObject {
     }
 
     /// 確保有一個用呢啲模型嘅伺服器喺 `port` 運行；已經係就唔重開。
-    func ensureRunning(whisperModel: String, llmModel: String, port: Int, language: String) {
-        let sameConfig = wantedPort == port && wantedWhisper == whisperModel && wantedLLM == llmModel
+    func ensureRunning(whisperModel: String, llmModel: String, port: Int, language: String, host: String = "127.0.0.1", token: String = "") {
+        let sameConfig = wantedPort == port && wantedWhisper == whisperModel && wantedLLM == llmModel && wantedHost == host && wantedToken == token
         if sameConfig, isRunning { return }
-        Task { await startOrAdopt(whisperModel: whisperModel, llmModel: llmModel, port: port, language: language) }
+        Task { await startOrAdopt(whisperModel: whisperModel, llmModel: llmModel, port: port, language: language, host: host, token: token) }
     }
 
-    func restart(whisperModel: String, llmModel: String, port: Int, language: String) {
+    func restart(whisperModel: String, llmModel: String, port: Int, language: String, host: String = "127.0.0.1", token: String = "") {
         stop()
         Task {
             try? await Task.sleep(for: .milliseconds(500))
-            await startOrAdopt(whisperModel: whisperModel, llmModel: llmModel, port: port, language: language)
+            await startOrAdopt(whisperModel: whisperModel, llmModel: llmModel, port: port, language: language, host: host, token: token)
         }
     }
 
@@ -93,17 +97,20 @@ final class MLXSidecar: ObservableObject {
         llmError = nil
     }
 
-    private func startOrAdopt(whisperModel: String, llmModel: String, port: Int, language: String) async {
+    private func startOrAdopt(whisperModel: String, llmModel: String, port: Int, language: String, host: String = "127.0.0.1", token: String = "") async {
         stop()
         wantedPort = port
         wantedWhisper = whisperModel
         wantedLLM = llmModel
         wantedLanguage = language
+        wantedHost = host
+        wantedToken = token
 
         // 已經有個伺服器（例如上次冇關到）而且模型一樣就直接用；但如果佢嘅 app 已經死咗就唔要
         if let running = await Self.health(port: port) {
             let llmMatches = llmModel.lowercased() == "none" ? running.llmModel == nil : running.llmModel == llmModel
-            if running.whisperModel == whisperModel, llmMatches, !running.isOrphan {
+            let accessMatches = (running.host ?? "127.0.0.1") == host && running.tokenRequired == !token.isEmpty
+            if running.whisperModel == whisperModel, llmMatches, accessMatches, !running.isOrphan {
                 state = .running
                 apply(running)
                 startHealthPolling(port: port)
@@ -136,7 +143,11 @@ final class MLXSidecar: ObservableObject {
             "--llm", llmModel,
             "--language", language,
             "--parent-pid", String(ProcessInfo.processInfo.processIdentifier),
+            "--host", host,
         ]
+        if !token.isEmpty {
+            proc.arguments? += ["--token", token]
+        }
         var environment = ProcessInfo.processInfo.environment
         environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (environment["PATH"] ?? "")
         environment["PYTHONUNBUFFERED"] = "1"
@@ -191,8 +202,8 @@ final class MLXSidecar: ObservableObject {
                         self.llmReady = false
                         if self.process == nil {
                             self.appendLog("伺服器冇回應，重新啟動…")
-                            let (whisper, llm, language) = (self.wantedWhisper, self.wantedLLM, self.wantedLanguage)
-                            await self.startOrAdopt(whisperModel: whisper, llmModel: llm, port: port, language: language)
+                            let (whisper, llm, language, host, token) = (self.wantedWhisper, self.wantedLLM, self.wantedLanguage, self.wantedHost, self.wantedToken)
+                            await self.startOrAdopt(whisperModel: whisper, llmModel: llm, port: port, language: language, host: host, token: token)
                             return
                         }
                     }
@@ -221,10 +232,10 @@ final class MLXSidecar: ObservableObject {
         if let launchedAt, Date().timeIntervalSince(launchedAt) < 20, quickFailures < 2 {
             quickFailures += 1
             appendLog("啟動失敗，\(quickFailures) 次重試…")
-            let (whisper, llm, port, language) = (wantedWhisper, wantedLLM, wantedPort, wantedLanguage)
+            let (whisper, llm, port, language, host, token) = (wantedWhisper, wantedLLM, wantedPort, wantedLanguage, wantedHost, wantedToken)
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(3))
-                await self?.startOrAdopt(whisperModel: whisper, llmModel: llm, port: port, language: language)
+                await self?.startOrAdopt(whisperModel: whisper, llmModel: llm, port: port, language: language, host: host, token: token)
             }
         } else if state != .stopped {
             quickFailures = 0
@@ -259,7 +270,9 @@ final class MLXSidecar: ObservableObject {
             llmReady: (llm?["ready"] as? Bool) ?? false,
             llmError: llm?["error"] as? String,
             pid: (json["pid"] as? NSNumber)?.int32Value,
-            parentPid: (json["parent_pid"] as? NSNumber)?.int32Value
+            parentPid: (json["parent_pid"] as? NSNumber)?.int32Value,
+            host: json["host"] as? String,
+            tokenRequired: (json["token_required"] as? Bool) ?? false
         )
     }
 

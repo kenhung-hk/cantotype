@@ -59,6 +59,12 @@ Menubar → 「模型試驗室…」（⌘L）。錄一段（或者載入音檔�
 - LLM 候選：Qwen3 4B／8B／14B／32B／30B-A3B（兩個版本）、Gemma 3 12B／27B、Qwen2.5 14B、Mistral Small 3.2、gpt-oss 20B、Llama 3.3 70B、兩個廣東話 fine-tune 7B；有 Ollama 的話佢嘅模型都會出現
 - 伺服器按 request 換模型：Whisper 同一時間 keep 一個，LLM 最多 keep 三個喺記憶體
 
+## iPhone 鍵盤（經 Tailscale 用 Mac 嘅模型）
+
+`ios/` 有一個 iOS app + 鍵盤 extension：英文 QWERTY 鍵盤加 🎤 錄廣東話＋英文、✨ Gemma 改寫，錄音同文字經 Tailscale 傳去部 Mac 處理。Mac 呢邊喺設定 → 遠端開放伺服器（bind `0.0.0.0` + token），掃 QR 就設定好 iPhone。詳見 [ios/README.md](ios/README.md)。
+
+伺服器為此加咗：`POST /v1/dictate`（一個 request 辨識＋整理）、`POST /v1/polish`（mode：colloquial／written／rephrase，可指定 LLM 例如 Gemma）、`--host`／`--token`。
+
 ## 語音辨識引擎
 
 | 引擎 | 優點 | 缺點 |
@@ -69,7 +75,7 @@ Menubar → 「模型試驗室…」（⌘L）。錄一段（或者載入音檔�
 
 ## LLM 整理
 
-預設 MLX `mlx-community/Qwen3-14B-4bit`（thinking 關掉），一句約 1 至 3 秒，同 Whisper 用同一個伺服器。設定可以換 Qwen3 8B（快）或者任何 mlx-community 嘅 instruct 模型。
+預設 MLX `mlx-community/Qwen3-8B-4bit`（thinking 關掉，greedy），一句約 1 秒，同 Whisper 用同一個伺服器。真人聲測試中 8B 比 14B 更忠於原句（14B 偶然會將「我想」改成「我唔想」）。設定可以換 14B、Gemma 3 或者任何 mlx-community 嘅 instruct 模型。
 
 Ollama 仍然係一個選項，但唔推薦：Qwen3 用 `think: false` 時，Ollama runner 遇到「英文字母緊貼中文字」（`K Y嗰邊`）會中途死機回傳半截答案（0.31 同 0.33 都係）。揀 Ollama 時 app 會先正規化輸入、斬斷就換 seed 重試、再用備用模型頂住。
 

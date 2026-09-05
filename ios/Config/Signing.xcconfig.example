@@ -1,0 +1,6 @@
+// iOS 簽名（本地檔案，唔會入 git）。cp Config/Signing.xcconfig.example Config/Signing.xcconfig
+// 模擬器 build 唔需要 team；裝上 iPhone 就要填你嘅 Apple Development team ID，
+// 而且 App Groups（group.com.kenhung.cantotype）要喺 developer 帳戶開埗——Xcode 自動簽名會幫你搞。
+CODE_SIGN_STYLE = Automatic
+CODE_SIGN_IDENTITY = Apple Development
+DEVELOPMENT_TEAM =

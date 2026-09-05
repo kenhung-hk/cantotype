@@ -1,0 +1,87 @@
+name: CantoTypeMobile
+options:
+  bundleIdPrefix: com.kenhung
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    GENERATE_INFOPLIST_FILE: false
+    SWIFT_STRICT_CONCURRENCY: minimal
+targets:
+  CantoTypeMobile:
+    type: application
+    platform: iOS
+    sources:
+      - path: CantoTypeMobile
+      - path: Shared
+    # 簽名（team）放喺唔入 git 嘅 Config/Signing.xcconfig；見 Config/Signing.xcconfig.example
+    configFiles:
+      Debug: Config/Signing.xcconfig
+      Release: Config/Signing.xcconfig
+    dependencies:
+      - target: CantoTypeKeyboard
+    info:
+      path: CantoTypeMobile/Info.plist
+      properties:
+        CFBundleDisplayName: CantoType
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSMicrophoneUsageDescription: CantoType 需要用麥克風錄低你講嘅廣東話，再傳去你部 Mac 轉成文字。
+        NSCameraUsageDescription: 掃描 Mac 上 CantoType 設定頁嘅 QR code，自動填好伺服器網址同 token。
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        CFBundleURLTypes:
+          - CFBundleURLSchemes: [cantotype]
+            CFBundleURLName: com.kenhung.CantoTypeMobile
+    entitlements:
+      path: CantoTypeMobile/CantoTypeMobile.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.kenhung.cantotype]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kenhung.CantoTypeMobile
+        PRODUCT_NAME: CantoType
+  CantoTypeKeyboard:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: CantoTypeKeyboard
+      - path: Shared
+    configFiles:
+      Debug: Config/Signing.xcconfig
+      Release: Config/Signing.xcconfig
+    info:
+      path: CantoTypeKeyboard/Info.plist
+      properties:
+        CFBundleDisplayName: CantoType 鍵盤
+        NSMicrophoneUsageDescription: 錄低你講嘅廣東話，傳去你部 Mac 轉成文字。
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
+          NSExtensionAttributes:
+            IsASCIICapable: true
+            PrefersRightToLeft: false
+            PrimaryLanguage: en-US
+            RequestsOpenAccess: true
+    entitlements:
+      path: CantoTypeKeyboard/CantoTypeKeyboard.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.kenhung.cantotype]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kenhung.CantoTypeMobile.Keyboard
+schemes:
+  CantoTypeMobile:
+    build:
+      targets:
+        CantoTypeMobile: all
+    run:
+      config: Debug

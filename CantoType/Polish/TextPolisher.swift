@@ -196,7 +196,7 @@ final class TextPolisher {
         switch config.provider {
         case .mlx:
             guard let base = URL(string: config.mlxBaseURL) else { throw PolishError.badHost }
-            reply = try await OpenAIChatClient(baseURL: base).chat(model: config.mlxModel, messages: messages, maxTokens: maxTokens, timeout: config.requestTimeout)
+            reply = try await OpenAIChatClient(baseURL: base).chat(model: config.mlxModel, messages: messages, temperature: 0.0, maxTokens: maxTokens, timeout: config.requestTimeout)
         case .ollama:
             reply = try await polishWithOllama(messages: messages, config: config, maxTokens: maxTokens)
         }

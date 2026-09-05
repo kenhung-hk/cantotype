@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var testingPolish = false
     @State private var inputDevices: [AudioInputDevice] = []
     @State private var defaultInputName = ""
+    @State private var tailscale = TailscaleInfo.Result()
 
     var body: some View {
         TabView {
@@ -16,8 +17,9 @@ struct SettingsView: View {
             recognitionTab.tabItem { Label("辨識", systemImage: "waveform") }
             polishTab.tabItem { Label("整理", systemImage: "wand.and.stars") }
             permissionsTab.tabItem { Label("權限", systemImage: "lock.shield") }
+            remoteTab.tabItem { Label("遠端", systemImage: "iphone.and.arrow.forward") }
         }
-        .frame(width: 600, height: 520)
+        .frame(width: 600, height: 560)
     }
 
     // MARK: - 一般
@@ -228,6 +230,51 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    // MARK: - 遠端（iOS 鍵盤經 Tailscale 連入）
+
+    private var remoteURL: String {
+        let port = URL(string: settings.httpURL)?.port ?? 8787
+        let host = tailscale.dnsName ?? tailscale.ip ?? "<Tailscale IP>"
+        return "http://\(host):\(port)"
+    }
+
+    private var remoteTab: some View {
+        Form {
+            Section("Tailscale 遠端存取") {
+                Toggle("允許其他裝置（iOS 鍵盤）經 Tailscale 連入呢部 Mac 嘅伺服器", isOn: $settings.remoteAccess)
+                Text("開咗之後伺服器會聽所有網絡介面，並要求 token。Tailscale 本身已經係加密私人網絡，token 係多一重保險。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if settings.remoteAccess {
+                Section("俾 iOS app 嘅設定") {
+                    LabeledContent("Tailscale IP", value: tailscale.ip ?? "未偵測到（Tailscale 有冇開？）")
+                    if let dns = tailscale.dnsName { LabeledContent("MagicDNS", value: dns) }
+                    LabeledContent("伺服器網址", value: remoteURL)
+                    HStack {
+                        Text("Token").frame(width: 120, alignment: .leading)
+                        Text(settings.remoteToken).font(.caption.monospaced()).textSelection(.enabled)
+                        Spacer()
+                        Button("複製") { TextInserter.copy(settings.remoteToken) }
+                        Button("重新產生") { settings.remoteToken = AppSettings.makeToken() }
+                    }
+                    if let cg = TailscaleInfo.qrImage(url: remoteURL, token: settings.remoteToken) {
+                        HStack(alignment: .top, spacing: 16) {
+                            Image(decorative: cg, scale: 1)
+                                .interpolation(.none)
+                                .resizable()
+                                .frame(width: 180, height: 180)
+                            Text("用 iPhone 上嘅 CantoType app → 設定 → 「掃描 Mac 嘅 QR」，網址同 token 會自動填好。或者手動輸入上面兩項。\n\niPhone 同 Mac 都要登入同一個 Tailscale 帳戶並且開住。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    LabeledContent("伺服器狀態", value: sidecar.summary)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { tailscale = TailscaleInfo.detect() }
     }
 
     // MARK: - 權限

@@ -137,6 +137,8 @@ final class AppSettings: ObservableObject {
         static let speakerContext = "speakerContext"
         static let techCorrection = "techCorrection"
         static let whisperPromptCustom = "whisperPromptCustom"
+        static let remoteAccess = "remoteAccess"
+        static let remoteToken = "remoteToken"
     }
 
     private let defaults = UserDefaults.standard
@@ -165,6 +167,9 @@ final class AppSettings: ObservableObject {
     @Published var techCorrection: Bool { didSet { defaults.set(techCorrection, forKey: Keys.techCorrection) } }
     /// 用戶自己寫嘅 Whisper prompt；空就用自動生成嗰句。
     @Published var whisperPromptCustom: String { didSet { defaults.set(whisperPromptCustom, forKey: Keys.whisperPromptCustom) } }
+    /// 開放伺服器俾 Tailscale／局域網（iOS 鍵盤）連入；伺服器會 bind 0.0.0.0 並要求 token。
+    @Published var remoteAccess: Bool { didSet { defaults.set(remoteAccess, forKey: Keys.remoteAccess) } }
+    @Published var remoteToken: String { didSet { defaults.set(remoteToken, forKey: Keys.remoteToken) } }
 
     init() {
         let d = UserDefaults.standard
@@ -191,7 +196,23 @@ final class AppSettings: ObservableObject {
         speakerContext = d.string(forKey: Keys.speakerContext) ?? SpeakerContext.defaultDescription
         techCorrection = d.object(forKey: Keys.techCorrection) as? Bool ?? true
         whisperPromptCustom = d.string(forKey: Keys.whisperPromptCustom) ?? ""
+        remoteAccess = d.object(forKey: Keys.remoteAccess) as? Bool ?? false
+        if let token = d.string(forKey: Keys.remoteToken), !token.isEmpty {
+            remoteToken = token
+        } else {
+            let token = AppSettings.makeToken()
+            remoteToken = token
+            d.set(token, forKey: Keys.remoteToken)
+        }
     }
+
+    static func makeToken() -> String {
+        UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+    }
+
+    /// 伺服器要 bind 嘅位址同 token（冇開放就只聽 localhost、唔要 token）。
+    var sidecarHost: String { remoteAccess ? "0.0.0.0" : "127.0.0.1" }
+    var sidecarToken: String { remoteAccess ? remoteToken : "" }
 
     /// 餵俾 LLM 嘅詞彙：只係用戶自己嘅（技術詞靠規則，唔靠清單）。
     var llmVocabulary: [String] { vocabularyList }
@@ -227,7 +248,7 @@ enum WhisperModelPreset: String, CaseIterable, Identifiable {
     case cantoneseTurbo = "Huan69/whisper-large-v3-turbo-cantonese-yue-english-mlx"
     case cantoneseTurboInt8 = "Huan69/whisper-large-v3-turbo-cantonese-yue-english-mlx-int8"
 
-    static let defaultModel = WhisperModelPreset.cantoneseTurbo.rawValue
+    static let defaultModel = WhisperModelPreset.cantoneseTurboInt8.rawValue
 
     var id: String { rawValue }
 
@@ -239,8 +260,8 @@ enum WhisperModelPreset: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .cantoneseTurbo: return "large-v3-turbo 廣東話＋英文 fine-tune（1.6 GB，預設）"
-        case .cantoneseTurboInt8: return "同上 int8 版（0.9 GB，較快）"
+        case .cantoneseTurbo: return "large-v3-turbo 廣東話＋英文 fine-tune（1.6 GB）"
+        case .cantoneseTurboInt8: return "同上 int8 版（0.9 GB，較快，預設）"
         }
     }
 }
@@ -286,7 +307,7 @@ enum LLMModelPreset: String, CaseIterable, Identifiable {
     case cantoneseQwen2_7b = "hyperkit/Qwen2-Cantonese-7B-Instruct-mlx"
     case cantoneseLLMChat7b = "hyperkit/CantoneseLLMChat-v1.0-7B-mlx"
 
-    static let defaultModel = LLMModelPreset.qwen3_14b.rawValue
+    static let defaultModel = LLMModelPreset.qwen3_8b.rawValue
 
     var id: String { rawValue }
 
@@ -299,8 +320,8 @@ enum LLMModelPreset: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .qwen3_14b: return "Qwen3 14B 4-bit（預設，約 8 GB）"
-        case .qwen3_8b: return "Qwen3 8B 4-bit（快，約 5 GB）"
+        case .qwen3_14b: return "Qwen3 14B 4-bit（約 8 GB，偶然會改句意）"
+        case .qwen3_8b: return "Qwen3 8B 4-bit（預設，快，約 5 GB）"
         case .qwen3_4b: return "Qwen3 4B 4-bit（最快，約 2.5 GB）"
         case .qwen3_32b: return "Qwen3 32B 4-bit（約 18 GB）"
         case .qwen3_30bA3bInstruct: return "Qwen3 30B-A3B Instruct 2507 4-bit（MoE，快，約 17 GB）"

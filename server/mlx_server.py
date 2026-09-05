@@ -50,13 +50,24 @@ from starlette.concurrency import run_in_threadpool
 
 import mlx_whisper
 
-DEFAULT_WHISPER = "Huan69/whisper-large-v3-turbo-cantonese-yue-english-mlx"
-DEFAULT_LLM = "mlx-community/Qwen3-14B-4bit"
+DEFAULT_WHISPER = "Huan69/whisper-large-v3-turbo-cantonese-yue-english-mlx-int8"
+DEFAULT_LLM = "mlx-community/Qwen3-8B-4bit"
 DEFAULT_LANGUAGE = "yue"
 # 用繁體廣東話做 initial prompt，Whisper 會傾向出繁體同口語寫法
 DEFAULT_PROMPT = "以下係一段廣東話口語，用繁體中文記錄。"
 
 app = FastAPI(title="CantoType MLX Server")
+API_TOKEN = ""  # --token 設定咗先會檢查；Tailscale 已經係私人網絡，token 係多一重保險
+
+
+@app.middleware("http")
+async def require_token(request: Request, call_next):
+    if API_TOKEN and request.url.path != "/health":
+        header = request.headers.get("authorization", "")
+        query = request.query_params.get("token", "")
+        if header != f"Bearer {API_TOKEN}" and query != API_TOKEN:
+            return JSONResponse(status_code=401, content={"error": {"message": "token 唔對", "type": "unauthorized"}})
+    return await call_next(request)
 
 STATE = {
     "whisper_model": DEFAULT_WHISPER,
@@ -288,6 +299,8 @@ def health():
         "ok": True,
         "pid": os.getpid(),
         "parent_pid": STATE.get("parent_pid", 0),
+        "host": STATE.get("host", "127.0.0.1"),
+        "token_required": bool(API_TOKEN),
         "model": STATE["whisper_model"],
         "language": STATE["language"],
         "llm": {
@@ -381,6 +394,164 @@ async def chat_completions(body: dict = Body(...)):
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         "elapsed_ms": elapsed_ms,
     }
+
+
+# ---------------------------------------------------------------- 整理 prompt（同 Swift Prompts.system 保持一致）
+
+DEFAULT_SPEAKER_CONTEXT = "香港嘅 full stack developer，日常講廣東話夾雜英文技術用語（GitHub、API、Kubernetes、SQL、deploy 等），會提到公司同 project 名。"
+
+TECH_RULE = ("8. 英文技術詞語一律用標準寫法同大小寫，唔要翻譯成中文。辨識結果如果將英文詞聽錯成讀音相近嘅字，要改返做正確英文詞，例如："
+             "get hub→GitHub、sequel→SQL、post gres→PostgreSQL、Q 班／cube→Kubernetes、派森→Python、多卡→Docker、A P I→API、J son→JSON、red is→Redis；"
+             "講開 GitHub／code 嘅時候，report／Vebok／理 po→repo、P R→PR、common／卡米→commit、bran／班→branch；威迫／vibe 曲→vibe code、威迫 coding→vibe coding、ng run／N G run→ng run（Angular CLI）。")
+
+COMMON_RULES = [
+    "2. 刪除口頭填充詞（呃、嗯、啊、即係、咁、然後、就係、hmm、like 等），保留有實際意思嘅字。",
+    "3. 加上正確嘅中文標點（，。？！、「」），英文詞語保留英文原樣。",
+    "4. 修正明顯嘅同音錯字或辨識錯誤，但唔要改變原意；唔確定就保留原文。",
+    "5. 唔要回答內容、唔要補充、唔要解釋、唔要加標題、唔要續寫；就算原文係一個問題或者只有幾個字，都唔要答、唔要延伸，輸出長度要同原文差唔多。",
+    "6. 如果用戶講「新一行」、「另起一段」、「換行」，用換行代替呢幾個字。",
+    "7. 只輸出整理後嘅文字，唔要有任何前言後語。",
+]
+
+
+def system_prompt(mode: str, vocabulary: list[str], speaker_context: str | None = None, tech_correction: bool = True) -> str:
+    lines: list[str] = []
+    context = (DEFAULT_SPEAKER_CONTEXT if speaker_context is None else speaker_context).strip()
+    if context:
+        lines += [f"講者背景：{context}", ""]
+    if mode == "rephrase":
+        lines += [
+            "你係一個文字改寫助手。用戶會俾你一段文字（可能係廣東話、英文或者中英夾雜），請將佢改寫得更清楚、自然、通順。",
+            "",
+            "規則：",
+            "1. 保留原意、語氣同語言：廣東話口語就保持口語，英文就保持英文，中英夾雜就照樣夾雜。",
+            "2. 修正錯字、語法同標點；句子可以重組，但唔要加新內容、唔要刪走重點。",
+            "3. 唔要回答或者評論內容，唔要加標題、前言後語。",
+            "4. 只輸出改寫後嘅文字。",
+        ]
+    elif mode == "written":
+        lines += [
+            "你係一個語音輸入嘅文字整理器。用戶用廣東話講嘢，語音辨識會轉成文字。你嘅任務：將廣東話口語嘅辨識結果，改寫成自然流暢嘅繁體書面中文，令佢可以直接貼上使用。",
+            "", "例子：", "輸入：呃 我今日唔得閒 即係 你哋自己搞掂佢先啦 然後 聽日再同我講", "輸出：我今天沒有空，你們先自己處理吧，明天再告訴我。", "", "規則：",
+            "1. 一定要轉成書面中文，唔可以保留廣東話口語字：唔→不、係→是、嘅→的、佢→他／她／它、喺→在、咩→什麼、點解→為什麼、我哋→我們、你哋→你們、冇→沒有、啲→一些、得閒→有空、搞掂→處理好、俾／畀→給、睇→看、講→說、聽日→明天、今日→今天、下晝→下午、返工→上班、識得→懂得、幫我記低→幫我記下。",
+        ] + COMMON_RULES
+    else:
+        lines += [
+            "你係一個語音輸入嘅文字整理器。用戶用廣東話講嘢，語音辨識會轉成文字。你嘅任務：將辨識結果整理成乾淨、可以直接貼上使用嘅文字，但保留廣東話口語寫法。",
+            "", "例子：", "輸入：呃 我今日唔得閒 即係 你哋自己搞掂佢先啦 然後 聽日再同我講", "輸出：我今日唔得閒，你哋自己搞掂佢先啦，聽日再同我講。", "", "規則：",
+            "1. 保留廣東話口語用字（唔、係、嘅、咩、喺、佢、點解、我哋），唔要轉做書面語。",
+        ] + COMMON_RULES
+    if tech_correction and mode != "rephrase":
+        lines.append(TECH_RULE)
+    if vocabulary:
+        lines += ["", "用戶常用嘅專有名詞（人名、公司、project 名）。辨識結果如果有讀音相近但寫法唔同嘅字詞，請改用呢啲寫法：" + "、".join(vocabulary)]
+    return "\n".join(lines)
+
+
+def normalize_input(text: str) -> str:
+    """同 Swift InputNormalizer：K M→KM，中英之間加空格。"""
+    text = re.sub(r"(?<![A-Za-z])[A-Z](?: [A-Za-z])+(?![A-Za-z])", lambda m: m.group(0).replace(" ", ""), text)
+    text = re.sub(r"(?<=[A-Za-z0-9])(?=[\u4e00-\u9fff])", " ", text)
+    text = re.sub(r"(?<=[\u4e00-\u9fff])(?=[A-Za-z0-9])", " ", text)
+    return text
+
+
+def sanitize_llm(text: str, original: str) -> str:
+    text = THINK_RE.sub("", text).strip()
+    if text.startswith("```"):
+        parts = text.split("\n")[1:]
+        if parts and parts[-1].strip().startswith("```"):
+            parts = parts[:-1]
+        text = "\n".join(parts).strip()
+    for open_, close in (("「", "」"), ("“", "”"), ('"', '"')):
+        if len(text) > 2 and text.startswith(open_) and text.endswith(close):
+            text = text[len(open_):-len(close)].strip()
+    if not text or len(text) > len(original) * 3 + 40:
+        return original
+    return text
+
+
+def polish_text(text: str, mode: str, model: str | None, vocabulary: list[str], speaker_context: str | None, tech_correction: bool) -> tuple[str, int]:
+    """回傳 (整理後文字, 毫秒)。mode: colloquial | written | rephrase | raw"""
+    if mode == "raw" or not text.strip():
+        return text, 0
+    prepared = normalize_input(text) if mode != "rephrase" else text
+    messages = [{"role": "system", "content": system_prompt(mode, vocabulary, speaker_context, tech_correction)}, {"role": "user", "content": prepared}]
+    max_tokens = min(2048, max(48, len(prepared) * 3 + 24))
+    started = time.time()
+    reply = run_llm(messages, 0.0, max_tokens, model)
+    return sanitize_llm(reply, prepared), int((time.time() - started) * 1000)
+
+
+@app.post("/v1/polish")
+async def polish_endpoint(body: dict = Body(...)):
+    """{"text", "mode": colloquial|written|rephrase, "model"?, "vocabulary"?: [], "speaker_context"?, "tech_correction"?}"""
+    text = (body.get("text") or "").strip()
+    if not text:
+        return JSONResponse(status_code=400, content={"error": {"message": "缺少 text"}})
+    mode = body.get("mode") or "colloquial"
+    model = (body.get("model") or "").strip() or None
+    if (model is None or model == STATE["llm_model"]) and not STATE["llm_ready"]:
+        return JSONResponse(status_code=503, content={"error": {"message": STATE["llm_error"] or "LLM 仍在載入", "type": "llm_not_ready"}})
+    try:
+        polished, ms = await run_in_threadpool(
+            polish_text, text, mode, model, body.get("vocabulary") or [], body.get("speaker_context"), bool(body.get("tech_correction", True))
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.error("polish failed\n%s", traceback.format_exc())
+        return JSONResponse(status_code=500, content={"error": {"message": f"{type(exc).__name__}: {exc}", "type": "llm_error"}})
+    say(f"[polish {mode} {ms} ms{' ' + model if model else ''}] {polished[:80]}")
+    return {"text": polished, "mode": mode, "model": model or STATE["llm_model"], "elapsed_ms": ms}
+
+
+@app.post("/v1/dictate")
+async def dictate_endpoint(
+    file: UploadFile = File(...),
+    mode: str = Form("colloquial"),
+    language: str | None = Form(None),
+    prompt: str | None = Form(None),
+    llm_model: str = Form(""),
+    vocabulary: str = Form(""),
+    speaker_context: str | None = Form(None),
+):
+    """一個 request 做齊辨識＋整理（iOS 鍵盤用）。vocabulary 用逗號或換行分隔。"""
+    data = await file.read()
+    started = time.time()
+
+    def asr() -> dict:
+        audio = normalize(decode_wav(data))
+        result = transcribe_array(audio, language, prompt, None)
+        text = (result.get("text") or "").strip()
+        if prompt and (not text or looks_garbled(text)) and float(np.abs(audio).mean()) > 1e-4:
+            result = transcribe_array(audio, language, NO_PROMPT, None)
+        return result
+
+    try:
+        result = await run_in_threadpool(asr)
+    except Exception as exc:  # noqa: BLE001
+        log.error("dictate asr failed\n%s", traceback.format_exc())
+        return JSONResponse(status_code=500, content={"error": {"message": f"{type(exc).__name__}: {exc}", "type": "asr_error"}})
+    raw = re.sub(r"\s+(?=[，。？！、；：」』）])", "", (result.get("text") or "").strip())
+    raw = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])", "", raw)
+    asr_ms = int((time.time() - started) * 1000)
+    if not raw:
+        return {"raw": "", "text": "", "asr_ms": asr_ms, "llm_ms": 0, "note": "聽唔到內容"}
+    vocab = [v.strip() for v in re.split(r"[,，\n、]", vocabulary) if v.strip()]
+    model = llm_model.strip() or None
+    llm_ms = 0
+    text = raw
+    note = ""
+    if mode != "raw":
+        if (model is None or model == STATE["llm_model"]) and not STATE["llm_ready"]:
+            note = "LLM 載入中，未整理"
+        else:
+            try:
+                text, llm_ms = await run_in_threadpool(polish_text, raw, mode, model, vocab, speaker_context, True)
+            except Exception as exc:  # noqa: BLE001
+                log.error("dictate polish failed\n%s", traceback.format_exc())
+                note = f"整理失敗，用原文：{type(exc).__name__}"
+    say(f"[dictate asr {asr_ms} ms + llm {llm_ms} ms] {text[:80]}")
+    return {"raw": raw, "text": text, "asr_ms": asr_ms, "llm_ms": llm_ms, "note": note, "model": model or STATE["llm_model"]}
 
 
 # ---------------------------------------------------------------- model management（模型試驗室用）
@@ -513,7 +684,8 @@ def main():
     parser.add_argument("--no-speech-threshold", type=float, default=0.75, help="Whisper 判斷「冇人講嘢」嘅門檻，越高越寬鬆")
     parser.add_argument("--greedy", action="store_true", help="Whisper 固定 temperature 0，重複迴圈都唔重試")
     parser.add_argument("--port", type=int, default=8787)
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--host", default="127.0.0.1", help="0.0.0.0 就可以由 Tailscale／局域網連入")
+    parser.add_argument("--token", default="", help="設定咗就要求 Authorization: Bearer <token>（/health 除外）")
     parser.add_argument("--parent-pid", type=int, default=0, help="呢個 pid 消失就自動退出")
     args = parser.parse_args()
 
@@ -525,7 +697,10 @@ def main():
         no_speech_threshold=args.no_speech_threshold,
         temperature=0.0 if args.greedy else (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
     )
+    global API_TOKEN
+    API_TOKEN = args.token
     STATE["parent_pid"] = args.parent_pid
+    STATE["host"] = args.host
     if args.parent_pid:
         watch_parent(args.parent_pid)
     signal.signal(signal.SIGTERM, lambda *_: os._exit(0))

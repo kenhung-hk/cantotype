@@ -114,6 +114,8 @@ final class AppState: ObservableObject {
             settings.$httpLanguage.map { _ in () }.eraseToAnyPublisher(),
             settings.$llmProvider.map { _ in () }.eraseToAnyPublisher(),
             settings.$llmModel.map { _ in () }.eraseToAnyPublisher(),
+            settings.$remoteAccess.map { _ in () }.eraseToAnyPublisher(),
+            settings.$remoteToken.map { _ in () }.eraseToAnyPublisher(),
         ]
         Publishers.MergeMany(sidecarTriggers)
             .dropFirst(sidecarTriggers.count)
@@ -175,7 +177,9 @@ final class AppState: ObservableObject {
                 whisperModel: settings.whisperModel,
                 llmModel: settings.sidecarLLMModel,
                 port: port,
-                language: settings.httpLanguage
+                language: settings.httpLanguage,
+                host: settings.sidecarHost,
+                token: settings.sidecarToken
             )
         } else {
             sidecar.stop()
@@ -191,7 +195,9 @@ final class AppState: ObservableObject {
             whisperModel: settings.whisperModel,
             llmModel: settings.sidecarLLMModel,
             port: url.port ?? 80,
-            language: settings.httpLanguage
+            language: settings.httpLanguage,
+            host: settings.sidecarHost,
+            token: settings.sidecarToken
         )
     }
 
@@ -205,7 +211,9 @@ final class AppState: ObservableObject {
             whisperModel: settings.whisperModel,
             llmModel: settings.sidecarLLMModel,
             port: port,
-            language: settings.httpLanguage
+            language: settings.httpLanguage,
+            host: settings.sidecarHost,
+            token: settings.sidecarToken
         )
     }
 
