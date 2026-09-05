@@ -2,14 +2,21 @@ import Foundation
 
 enum TranscriptionError: LocalizedError {
     case emptyAudio
-    case noResult
+    case tooQuiet(peakDb: Float)
+    case noResult(peakDb: Float)
     case backendUnavailable(String)
     case server(Int, String)
 
     var errorDescription: String? {
         switch self {
         case .emptyAudio: return "冇錄到聲音"
-        case .noResult: return "聽唔到內容"
+        case .tooQuiet(let peak):
+            return "冇錄到聲音（峰值 \(Int(peak)) dB）。檢查下麥克風揀對未、系統輸入音量夠唔夠。"
+        case .noResult(let peak):
+            if peak < -25 {
+                return "聽唔到內容（錄音峰值 \(Int(peak)) dB，聲太細）。試下靠近麥克風或者大聲啲。"
+            }
+            return "聽唔到內容"
         case .backendUnavailable(let reason): return reason
         case .server(let code, let body):
             let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -1,21 +1,21 @@
 # CantoType
 
-macOS menubar 語音輸入 app，做嘅嘢同 Typeless 一樣，但係全部喺本機行、專為廣東話而設：
+macOS menubar 語音輸入 app，做嘅嘢同 Typeless 一樣，但係全部喺本機用 MLX 行、專為廣東話而設：
 
 1. 按住快捷鍵（預設右邊 ⌥ Option）講廣東話
-2. 放手 → 本地 MLX Whisper（廣東話＋英文 fine-tune）轉成文字；macOS 26 內置 on-device 語音辨識（`zh_HK`）做後備
-3. 本機 Ollama（預設 `qwen3:14b`）刪填充詞、加標點、修正錯字，可揀保留口語或者轉書面語
+2. 放手 → 本地 MLX Whisper（廣東話＋英文 fine-tune）轉成文字
+3. 本地 MLX Qwen3（14B 4-bit）刪填充詞、加標點、修正錯字，可揀保留口語或者轉書面語
 4. 自動貼到你當時 focus 嘅 app
 
-冇任何聲音或文字離開你部 Mac。
+兩個模型由同一個 Python 伺服器提供，app 一開就自動起、一關就自動收，Xcode 按 Run 就係全部。冇任何聲音或文字離開你部 Mac。
 
 ## 需要
 
 - macOS 26（Tahoe）以上：用到新嘅 `SpeechAnalyzer` / `SpeechTranscriber`
 - Xcode 26
 - [xcodegen](https://github.com/yonaskolb/XcodeGen)（`brew install xcodegen`），用嚟由 `project.yml` 生成 `.xcodeproj`
-- [uv](https://docs.astral.sh/uv/)（`brew install uv`）：app 用佢自動起本地 MLX Whisper 伺服器，第一次會下載模型（約 1.6 GB）
-- [Ollama](https://ollama.com) 同一個模型（`ollama pull qwen3:14b`）。唔裝都用得，揀「原文」模式就唔經 LLM
+- [uv](https://docs.astral.sh/uv/)（`brew install uv`）：app 用佢自動起本地 MLX 伺服器（`server/mlx_server.py`，打包喺 app bundle 入面）。第一次會下載 Whisper（約 1.6 GB）同 Qwen3（約 8 GB）
+- 唔需要 Ollama。想用都可以喺設定 → 整理揀 Ollama 做 LLM
 
 ## 開始
 
@@ -37,7 +37,7 @@ make run        # xcodebuild 編譯再啟動
 
 如果你揀 Fn / 🌐 做快捷鍵，要去「系統設定 › 鍵盤 › 按下 🌐 鍵時」揀「不執行任何操作」。
 
-第一次啟動會下載 MLX Whisper 模型（約 1.6 GB）同 Apple 語言包（約 30 秒），menubar 選單會顯示進度。Whisper 未就緒之前會暫時用 Apple 語音頂住，唔會等。
+第一次啟動會下載模型：Whisper 約 1.6 GB（一兩分鐘），Qwen3 約 8 GB（十分鐘左右），menubar 選單會顯示進度。Whisper 就緒之後已經可以用；LLM 未就緒期間會直接貼原文，HUD 會話你知「LLM 載入中，未整理」。
 
 ## 簽名
 
@@ -65,29 +65,44 @@ $BIN --help
 |---|---|---|
 | **MLX Whisper 廣東話 fine-tune**（預設）`Huan69/whisper-large-v3-turbo-cantonese-yue-english-mlx` | 出正宗廣東話口語繁體，英文詞（E-mail、iPhone）聽得準，13 秒音檔 0.6 秒 | 要 uv、第一次下載 1.6 GB |
 | MLX Whisper `mlx-community/whisper-large-v3-mlx` | 原版最準 | 半形標點、偶然出書面語 |
-| Apple 內置 `zh_HK` | 零依賴、零下載（語言包 30 秒） | 英文名／術語聽得差（security → securery） |
+| Apple 內置 `zh_HK`（可選） | 零依賴、零下載 | 英文名／術語聽得差（security → securery） |
 
-伺服器由 app 自動管理：設定 → 辨識 → 揀模型，app 會 `uv run` 打包喺 bundle 入面嘅 `server/whisper_server.py`，app 結束時伺服器自己退出（`--parent-pid` 監察）。任何 HuggingFace 上 MLX 格式嘅 Whisper repo 都可以填入去；唔係 localhost 嘅網址（例如另一部機嘅 whisper.cpp server）就唔會自動起伺服器。
+## LLM 整理
 
-手動起伺服器（例如畀 CLI 用）：
+預設 MLX `mlx-community/Qwen3-14B-4bit`（thinking 關掉），一句約 1 至 3 秒，同 Whisper 用同一個伺服器。設定可以換 Qwen3 8B（快）或者任何 mlx-community 嘅 instruct 模型。
+
+Ollama 仍然係一個選項，但唔推薦：Qwen3 用 `think: false` 時，Ollama runner 遇到「英文字母緊貼中文字」（`K Y嗰邊`）會中途死機回傳半截答案（0.31 同 0.33 都係）。揀 Ollama 時 app 會先正規化輸入、斬斷就換 seed 重試、再用備用模型頂住。
+
+## 聲太細
+
+- 錄音會自動增益到 -3 dBFS（最多 +30 dB），Whisper 同 Apple 都受惠；伺服器端亦會再 normalize 一次
+- Whisper 嘅 `no_speech_threshold` 放寬到 0.75，細聲唔會俾佢當成靜音丟走
+- 聽唔到內容時 HUD 會顯示錄音峰值（例如「-38 dB，聲太細」）並播提示音
+- 設定 → 一般 → 麥克風：揀輸入裝置、即時音量測試、一鍵開系統聲音設定。Mac Studio 冇內置 mic，預設好可能係 webcam 嘅 mic，離得遠就細聲
+
+## MLX 伺服器
 
 ```sh
-uv run server/whisper_server.py --model Huan69/whisper-large-v3-turbo-cantonese-yue-english-mlx --port 8787
+uv run server/mlx_server.py                                   # Whisper + Qwen3，port 8787
+uv run server/mlx_server.py --llm none                        # 只要 Whisper
+uv run server/mlx_server.py --llm mlx-community/Qwen3-8B-4bit
+curl -s localhost:8787/health
 ```
 
-## LLM 整理（Ollama）
+Endpoint：`POST /v1/audio/transcriptions`、`POST /v1/chat/completions`（OpenAI 相容）、`GET /health`。App 用 `--parent-pid` 起佢，app 消失伺服器就自己退出。任何 OpenAI 相容嘅伺服器（whisper.cpp server、mlx_lm.server、LM Studio）都可以喺設定填網址接入。
 
-Qwen3 用 `think: false` 先夠快（一句約 1 秒）。已知 Ollama 嘅 runner 遇到辨識結果有「英文字母緊貼中文字」（例如 `K Y嗰邊`）會中途死機，回傳 `done: false` 嘅半截答案，兩個 Ollama 版本（0.31、0.33）都一樣。App 有三層保護：
+## CLI
 
-1. 送去 LLM 之前先正規化：`K M` → `KM`，英文同中文之間加空格
-2. 回應斬斷就換 seed／溫度再試一次
-3. 仍然斬斷就用備用模型（預設 `qwen2.5vl:7b`，設定可改或留空），最後先會直接貼原文
-
-測試 LLM 唔使錄音：
+App 本身就係 CLI，方便用你自己嘅錄音比較模型、測 LLM：
 
 ```sh
-$BIN --polish "呃 我覺得 K M同 K Y嗰邊 security可以做好啲" --mode colloquial
-$BIN --polish "..." --mode written --model qwen3:14b --fallback-model qwen2.5vl:7b
+scripts/record_sample.sh ~/Desktop/sample.wav 8              # 錄 8 秒
+BIN=build/Build/Products/Debug/CantoType.app/Contents/MacOS/CantoType
+$BIN --transcribe ~/Desktop/sample.wav --backend http                   # MLX Whisper，原文 + 音量
+$BIN --transcribe ~/Desktop/sample.wav --backend http --mode colloquial # + Qwen3 口語整理
+$BIN --transcribe ~/Desktop/sample.wav --locale zh_HK                   # Apple 語音
+$BIN --polish "呃 我覺得 K M同 K Y嗰邊 security可以做好啲" --mode written
+$BIN --help
 ```
 
 ## 結構
@@ -103,10 +118,11 @@ CantoType/
     HUDPanel.swift              屏幕底部浮動狀態膠囊
   Core/
     Settings.swift              UserDefaults 設定、快捷鍵／模式／Whisper 模型 enum
-    WhisperSidecar.swift        自動啟動／監察本地 MLX Whisper 伺服器
+    MLXSidecar.swift            自動啟動／監察本地 MLX 伺服器（Whisper + LLM）
+    AudioDevices.swift          CoreAudio 輸入裝置列表／選擇
     HotkeyMonitor.swift         CGEvent tap 全局快捷鍵
-    AudioRecorder.swift         AVAudioEngine → 16 kHz Int16
-    AudioClip.swift             錄音資料、WAV、格式轉換
+    AudioRecorder.swift         AVAudioEngine → 16 kHz Int16，可揀裝置、測音量
+    AudioClip.swift             錄音資料、WAV、格式轉換、音量統計同自動增益
     TextInserter.swift          剪貼簿 + ⌘V，之後還原剪貼簿
     Permissions.swift           麥克風／輔助使用權限、提示音
     HistoryStore.swift          最近輸入記錄（~/Library/Application Support/CantoType）
@@ -115,10 +131,10 @@ CantoType/
     AppleSpeechBackend.swift    macOS 26 SpeechAnalyzer（on-device）
     HTTPTranscriptionBackend.swift  OpenAI 相容 HTTP 伺服器
   Polish/
-    TextPolisher.swift          Ollama client、輸入正規化、重試／備用模型、廣東話 prompt
+    TextPolisher.swift          MLX（OpenAI 相容）／Ollama client、輸入正規化、廣東話 prompt
   CLI/
     CLIRunner.swift             --transcribe / --polish 命令列模式
-server/whisper_server.py        mlx-whisper 伺服器（打包入 app bundle）
+server/mlx_server.py            MLX 伺服器：Whisper + Qwen3（打包入 app bundle）
 scripts/record_sample.sh        錄測試音檔
 ```
 
@@ -126,6 +142,5 @@ scripts/record_sample.sh        錄測試音檔
 
 - 錄音期間即時串流入 SpeechAnalyzer（放手一刻已經有大部分結果）
 - 用 Accessibility API 直接插入文字，唔經剪貼簿
-- LLM 都轉用 MLX（`mlx_lm.server` + `mlx-community/Qwen3-14B-4bit`），完全避開 Ollama runner 嘅 bug
 - 學習你嘅用字習慣：由「最近輸入」自動累積常用詞彙
 - 語音指令（「刪除上一句」、「全部大寫」）

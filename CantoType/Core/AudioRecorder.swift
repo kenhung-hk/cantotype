@@ -13,23 +13,31 @@ enum RecorderError: LocalizedError {
 
 /// 用 AVAudioEngine 錄音，即時轉成 16 kHz 單聲道 Int16。
 final class AudioRecorder {
-    /// 0…1 嘅音量，喺 audio thread 回傳。
+    /// 0…1 嘅音量（對數刻度，-50 dBFS 起計），喺 audio thread 回傳。
     var onLevel: ((Float) -> Void)?
+    /// 空字串＝系統預設輸入裝置。
+    var inputDeviceUID: String = ""
 
     private let engine = AVAudioEngine()
     private let targetFormat = AudioClip.format
     private var converter: AVAudioConverter?
     private var samples: [Int16] = []
+    private var discardSamples = false
     private let lock = NSLock()
     private(set) var isRecording = false
 
-    func start() throws {
+    /// - Parameter monitorOnly: 只係計音量（設定頁測試麥克風用），唔儲存聲音。
+    func start(monitorOnly: Bool = false) throws {
         guard !isRecording else { return }
         lock.lock()
         samples.removeAll(keepingCapacity: true)
         lock.unlock()
+        discardSamples = monitorOnly
 
         let input = engine.inputNode
+        if !inputDeviceUID.isEmpty, let deviceID = AudioDevices.deviceID(forUID: inputDeviceUID), let unit = input.audioUnit {
+            _ = AudioDevices.select(deviceID, on: unit)
+        }
         let inputFormat = input.outputFormat(forBus: 0)
         guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
             throw RecorderError.noInputDevice
@@ -83,11 +91,14 @@ final class AudioRecorder {
             sum += f * f
         }
         let rms = sqrt(sum / Float(count))
+        let db = 20 * log10(max(rms, 1e-6))
+        let level = max(0, min(1, (db + 50) / 50))
 
-        lock.lock()
-        samples.append(contentsOf: pointer)
-        lock.unlock()
-
-        onLevel?(min(1, rms * 8))
+        if !discardSamples {
+            lock.lock()
+            samples.append(contentsOf: pointer)
+            lock.unlock()
+        }
+        onLevel?(level)
     }
 }

@@ -15,9 +15,11 @@ enum CLIRunner {
       --language yue            HTTP 引擎語言代碼（預設 yue）
       --http-model <名稱>        HTTP 引擎模型名稱（可省略）
       --mode raw|colloquial|written   LLM 整理模式（預設 raw，即唔整理）
-      --model qwen3:14b         Ollama 模型（預設 qwen3:14b）
+      --llm mlx|ollama          LLM 提供者（預設 mlx，即 CantoType 嘅 MLX 伺服器）
+      --llm-url <網址>           MLX 伺服器 base URL（預設 http://127.0.0.1:8787）
+      --model <名稱>             LLM 模型（MLX 預設 mlx-community/Qwen3-14B-4bit；Ollama 預設 qwen3:14b）
       --ollama <網址>            Ollama 網址（預設 http://127.0.0.1:11434）
-      --fallback-model <名稱>    主模型回應斬斷時用嘅備用模型（預設 qwen2.5vl:7b）
+      --fallback-model <名稱>    Ollama 主模型回應斬斷時用嘅備用模型（預設 qwen2.5vl:7b）
 
     例：
       CantoType --transcribe ~/Desktop/test.wav --mode colloquial
@@ -84,7 +86,10 @@ enum CLIRunner {
             print("辨識：\(backend.displayName)")
 
             let t0 = Date()
-            let raw = TranscriptCleaner.normalize(try await backend.transcribe(clip))
+            let stats = clip.stats
+            let prepared = clip.normalized()
+            print("音量：峰值 \(Int(stats.peakDb)) dB，RMS \(Int(stats.rmsDb)) dB" + (prepared.stats.peakDb != stats.peakDb ? "，已增益到 \(Int(prepared.stats.peakDb)) dB" : ""))
+            let raw = TranscriptCleaner.normalize(try await backend.transcribe(prepared))
             print("原文（\(elapsed(since: t0))）：\(raw)")
 
             if mode != .raw {
@@ -116,9 +121,13 @@ enum CLIRunner {
 
     private static func polishConfig(from args: [String]) -> PolishConfig {
         var config = PolishConfig.cliDefault
-        if let model = value("--model", in: args) { config.model = model }
-        if let host = value("--ollama", in: args) { config.host = host }
-        if let fallback = value("--fallback-model", in: args) { config.fallbackModel = fallback }
+        if let provider = value("--llm", in: args).flatMap(LLMProvider.init(rawValue:)) { config.provider = provider }
+        if let url = value("--llm-url", in: args) { config.mlxBaseURL = url }
+        if let model = value("--model", in: args) {
+            if config.provider == .mlx { config.mlxModel = model } else { config.ollamaModel = model }
+        }
+        if let host = value("--ollama", in: args) { config.ollamaHost = host }
+        if let fallback = value("--fallback-model", in: args) { config.ollamaFallbackModel = fallback }
         return config
     }
 

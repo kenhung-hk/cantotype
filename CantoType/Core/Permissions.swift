@@ -35,6 +35,10 @@ enum Permissions {
         open("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
     }
 
+    static func openSoundSettings() {
+        open("x-apple.systempreferences:com.apple.Sound-Settings.extension")
+    }
+
     private static func open(_ string: String) {
         if let url = URL(string: string) {
             NSWorkspace.shared.open(url)
@@ -43,13 +47,14 @@ enum Permissions {
 }
 
 enum Sounds {
-    enum Kind { case start, stop }
+    enum Kind { case start, stop, error }
 
     static func play(_ kind: Kind) {
         let name: String
         switch kind {
         case .start: name = "Pop"
         case .stop: name = "Tink"
+        case .error: name = "Basso"
         }
         NSSound(named: name)?.play()
     }

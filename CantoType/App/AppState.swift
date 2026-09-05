@@ -13,7 +13,7 @@ final class AppState: ObservableObject {
         case transcribing
         case polishing
         case pasting
-        case done
+        case done(String)
         case error(String)
 
         var label: String {
@@ -23,7 +23,7 @@ final class AppState: ObservableObject {
             case .transcribing: return "辨識中…"
             case .polishing: return "整理中…"
             case .pasting: return "貼上中…"
-            case .done: return "已貼上"
+            case .done(let note): return note.isEmpty ? "已貼上" : "已貼上\(note)"
             case .error(let message): return "出錯：\(message)"
             }
         }
@@ -44,10 +44,11 @@ final class AppState: ObservableObject {
     @Published private(set) var ollamaReachable: Bool?
     @Published private(set) var hotkeyArmed = false
     @Published private(set) var appleAssetStatus: String = ""
+    @Published private(set) var micTesting = false
 
     let settings = AppSettings.shared
     let history = HistoryStore()
-    let sidecar = WhisperSidecar()
+    let sidecar = MLXSidecar()
 
     private let recorder = AudioRecorder()
     private let hotkey = HotkeyMonitor()
@@ -70,6 +71,7 @@ final class AppState: ObservableObject {
     // MARK: - Lifecycle
 
     func start() {
+        recorder.inputDeviceUID = settings.inputDeviceUID
         recorder.onLevel = { [weak self] value in
             Task { @MainActor in self?.level = value }
         }
@@ -87,20 +89,34 @@ final class AppState: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in Task { @MainActor in self?.armHotkey() } }
             .store(in: &cancellables)
+        settings.$inputDeviceUID
+            .dropFirst()
+            .sink { [weak self] uid in Task { @MainActor in self?.recorder.inputDeviceUID = uid } }
+            .store(in: &cancellables)
         settings.$appleLocale
             .dropFirst()
             .debounce(for: .seconds(0.5), scheduler: RunLoop.main)
             .sink { [weak self] _ in Task { @MainActor in await self?.warmUpApple() } }
             .store(in: &cancellables)
-        Publishers.CombineLatest(settings.$ollamaHost, settings.$ollamaModel)
+        Publishers.CombineLatest3(settings.$ollamaHost, settings.$ollamaModel, settings.$llmProvider)
             .dropFirst()
             .debounce(for: .seconds(1), scheduler: RunLoop.main)
             .sink { [weak self] _ in Task { @MainActor in await self?.warmUpOllama() } }
             .store(in: &cancellables)
 
-        Publishers.CombineLatest4(settings.$backend, settings.$whisperModel, settings.$manageSidecar, settings.$httpURL)
-            .dropFirst()
-            .debounce(for: .seconds(0.8), scheduler: RunLoop.main)
+        // 任何影響 MLX 伺服器嘅設定一改就同步
+        let sidecarTriggers: [AnyPublisher<Void, Never>] = [
+            settings.$backend.map { _ in () }.eraseToAnyPublisher(),
+            settings.$whisperModel.map { _ in () }.eraseToAnyPublisher(),
+            settings.$manageSidecar.map { _ in () }.eraseToAnyPublisher(),
+            settings.$httpURL.map { _ in () }.eraseToAnyPublisher(),
+            settings.$httpLanguage.map { _ in () }.eraseToAnyPublisher(),
+            settings.$llmProvider.map { _ in () }.eraseToAnyPublisher(),
+            settings.$llmModel.map { _ in () }.eraseToAnyPublisher(),
+        ]
+        Publishers.MergeMany(sidecarTriggers)
+            .dropFirst(sidecarTriggers.count)
+            .debounce(for: .seconds(1), scheduler: RunLoop.main)
             .sink { [weak self] _ in Task { @MainActor in self?.syncSidecar() } }
             .store(in: &cancellables)
 
@@ -121,22 +137,6 @@ final class AppState: ObservableObject {
         hotkey.stop()
         permissionTimer?.invalidate()
         sidecar.stop()
-    }
-
-    // MARK: - MLX Whisper sidecar
-
-    /// 設定係「MLX Whisper + localhost」就由 app 管理伺服器，否則關掉。
-    func syncSidecar() {
-        if let port = settings.sidecarPort {
-            sidecar.ensureRunning(model: settings.whisperModel, port: port, language: settings.httpLanguage)
-        } else {
-            sidecar.stop()
-        }
-    }
-
-    func restartSidecar() {
-        guard let port = settings.sidecarPort else { return }
-        sidecar.restart(model: settings.whisperModel, port: port, language: settings.httpLanguage)
     }
 
     func armHotkey() {
@@ -160,6 +160,32 @@ final class AppState: ObservableObject {
                 }
             }
         }
+    }
+
+    // MARK: - MLX sidecar
+
+    /// 設定係「MLX Whisper + localhost」就由 app 管理伺服器，否則關掉。
+    func syncSidecar() {
+        if let port = settings.sidecarPort {
+            sidecar.ensureRunning(
+                whisperModel: settings.whisperModel,
+                llmModel: settings.sidecarLLMModel,
+                port: port,
+                language: settings.httpLanguage
+            )
+        } else {
+            sidecar.stop()
+        }
+    }
+
+    func restartSidecar() {
+        guard let port = settings.sidecarPort else { return }
+        sidecar.restart(
+            whisperModel: settings.whisperModel,
+            llmModel: settings.sidecarLLMModel,
+            port: port,
+            language: settings.httpLanguage
+        )
     }
 
     // MARK: - Hotkey
@@ -186,6 +212,7 @@ final class AppState: ObservableObject {
 
     func beginRecording() {
         guard !phase.isBusy else { return }
+        if micTesting { setMicTest(false) }
         resetTask?.cancel()
         do {
             try recorder.start()
@@ -220,31 +247,62 @@ final class AppState: ObservableObject {
         hud.hide()
     }
 
+    /// 設定頁「測試麥克風」：只計音量，唔錄音。
+    func setMicTest(_ on: Bool) {
+        if on {
+            guard !phase.isBusy, !micTesting else { return }
+            do {
+                try recorder.start(monitorOnly: true)
+                micTesting = true
+            } catch {
+                micTesting = false
+            }
+        } else {
+            guard micTesting else { return }
+            _ = recorder.stop()
+            micTesting = false
+            level = 0
+        }
+    }
+
     // MARK: - Pipeline
 
     private func process(_ clip: AudioClip) async {
         phase = .transcribing
         let started = Date()
         do {
-            var backend = try currentBackend()
-            var backendNote = ""
-            // Whisper 伺服器仲喺載入（例如第一次下載模型）就先用 Apple 頂住
-            if settings.backend == .http, settings.sidecarPort != nil, !sidecar.status.isReady {
-                backend = appleBackend(for: settings.appleLocale)
-                backendNote = "（Whisper 未就緒，改用 Apple）"
+            let stats = clip.stats
+            guard stats.peakDb > -55 else { throw TranscriptionError.tooQuiet(peakDb: stats.peakDb) }
+            // 細聲自動增益，Whisper 同 Apple 都受惠
+            let prepared = clip.normalized()
+
+            let backend = try currentBackend()
+            if settings.backend == .http, settings.sidecarPort != nil, !sidecar.whisperReady {
+                let hint = sidecar.lastLogLine.isEmpty ? sidecar.summary : sidecar.lastLogLine
+                throw TranscriptionError.backendUnavailable("MLX Whisper 仍在載入：\(hint)")
             }
-            let raw = TranscriptCleaner.normalize(try await backend.transcribe(clip))
-            guard !raw.isEmpty else { throw TranscriptionError.noResult }
+
+            let raw = TranscriptCleaner.normalize(try await backend.transcribe(prepared))
+            guard !raw.isEmpty else { throw TranscriptionError.noResult(peakDb: stats.peakDb) }
 
             var output = raw
+            var note = ""
             if settings.polishMode != .raw {
-                phase = .polishing
-                output = await polisher.polishOrFallback(
-                    raw,
-                    mode: settings.polishMode,
-                    vocabulary: settings.vocabularyList,
-                    config: settings.polishConfig
-                )
+                if settings.llmProvider == .mlx, settings.sidecarPort != nil, !sidecar.llmReady {
+                    // LLM 仲喺下載／載入：先貼原文，唔要等
+                    note = "（LLM 載入中，未整理）"
+                } else {
+                    phase = .polishing
+                    output = await polisher.polishOrFallback(
+                        raw,
+                        mode: settings.polishMode,
+                        vocabulary: settings.vocabularyList,
+                        config: settings.polishConfig
+                    )
+                    if output == raw, settings.polishMode != .raw, output.count > 8 {
+                        // 完全冇改動通常係 LLM 出錯 fallback；唔提示，只記錄
+                    }
+                }
             }
 
             phase = .pasting
@@ -254,12 +312,13 @@ final class AppState: ObservableObject {
                 raw: raw,
                 polished: output,
                 duration: clip.duration,
-                backend: backend.displayName + backendNote,
+                backend: backend.displayName,
                 mode: settings.polishMode,
-                elapsed: Date().timeIntervalSince(started)
+                elapsed: Date().timeIntervalSince(started),
+                peakDb: stats.peakDb
             ))
-            phase = .done
-            scheduleReset(after: 1.2)
+            phase = .done(note)
+            scheduleReset(after: note.isEmpty ? 1.2 : 2.5)
         } catch {
             fail(error.localizedDescription)
         }
@@ -268,7 +327,8 @@ final class AppState: ObservableObject {
     private func fail(_ message: String) {
         phase = .error(message)
         if settings.showHUD { hud.show() }
-        scheduleReset(after: 3)
+        if settings.playSounds { Sounds.play(.error) }
+        scheduleReset(after: 4)
     }
 
     private func scheduleReset(after seconds: Double) {
@@ -303,6 +363,7 @@ final class AppState: ObservableObject {
     }
 
     func warmUpApple() async {
+        guard settings.backend == .apple else { return }
         let identifier = settings.appleLocale
         let backend = appleBackend(for: identifier)
         appleAssetStatus = "檢查語言包…"
@@ -317,17 +378,26 @@ final class AppState: ObservableObject {
     }
 
     func warmUpOllama() async {
+        guard settings.llmProvider == .ollama else {
+            ollamaReachable = nil
+            return
+        }
         ollamaReachable = await polisher.warmUp(config: settings.polishConfig)
     }
 
-    /// 設定頁「測試連線」用。
-    func testOllama() async -> String {
-        guard let url = URL(string: settings.ollamaHost) else { return "網址無效" }
-        let client = OllamaClient(host: url)
-        guard await client.isReachable() else { return "連接唔到 \(settings.ollamaHost)" }
-        let models = (try? await client.listModels()) ?? []
-        guard models.contains(where: { $0 == settings.ollamaModel || $0.hasPrefix(settings.ollamaModel + ":") }) else {
-            return "已連接，但搵唔到模型「\(settings.ollamaModel)」。可用：\(models.joined(separator: "、"))"
+    /// 設定頁「測試 LLM」用。
+    func testPolish() async -> String {
+        if settings.llmProvider == .mlx, settings.sidecarPort != nil, !sidecar.llmReady {
+            return "MLX LLM 未就緒：\(sidecar.summary)"
+        }
+        if settings.llmProvider == .ollama {
+            guard let url = URL(string: settings.ollamaHost) else { return "網址無效" }
+            let client = OllamaClient(host: url)
+            guard await client.isReachable() else { return "連接唔到 \(settings.ollamaHost)" }
+            let models = (try? await client.listModels()) ?? []
+            guard models.contains(where: { $0 == settings.ollamaModel || $0.hasPrefix(settings.ollamaModel + ":") }) else {
+                return "已連接，但搵唔到模型「\(settings.ollamaModel)」。可用：\(models.joined(separator: "、"))"
+            }
         }
         let started = Date()
         do {

@@ -27,7 +27,7 @@ enum BackendKind: String, CaseIterable, Identifiable, Codable {
     var label: String {
         switch self {
         case .apple: return "Apple 內置語音（on-device）"
-        case .http: return "MLX Whisper（本地伺服器）"
+        case .http: return "MLX Whisper（本地伺服器，推薦）"
         }
     }
 }
@@ -121,6 +121,9 @@ final class AppSettings: ObservableObject {
         static let httpLanguage = "httpLanguage"
         static let whisperModel = "whisperModel"
         static let manageSidecar = "manageSidecar"
+        static let llmProvider = "llmProvider"
+        static let llmModel = "llmModel"
+        static let inputDeviceUID = "inputDeviceUID"
         static let polishMode = "polishMode"
         static let ollamaHost = "ollamaHost"
         static let ollamaModel = "ollamaModel"
@@ -142,6 +145,9 @@ final class AppSettings: ObservableObject {
     @Published var httpLanguage: String { didSet { defaults.set(httpLanguage, forKey: Keys.httpLanguage) } }
     @Published var whisperModel: String { didSet { defaults.set(whisperModel, forKey: Keys.whisperModel) } }
     @Published var manageSidecar: Bool { didSet { defaults.set(manageSidecar, forKey: Keys.manageSidecar) } }
+    @Published var llmProvider: LLMProvider { didSet { defaults.set(llmProvider.rawValue, forKey: Keys.llmProvider) } }
+    @Published var llmModel: String { didSet { defaults.set(llmModel, forKey: Keys.llmModel) } }
+    @Published var inputDeviceUID: String { didSet { defaults.set(inputDeviceUID, forKey: Keys.inputDeviceUID) } }
     @Published var polishMode: PolishMode { didSet { defaults.set(polishMode.rawValue, forKey: Keys.polishMode) } }
     @Published var ollamaHost: String { didSet { defaults.set(ollamaHost, forKey: Keys.ollamaHost) } }
     @Published var ollamaModel: String { didSet { defaults.set(ollamaModel, forKey: Keys.ollamaModel) } }
@@ -162,6 +168,9 @@ final class AppSettings: ObservableObject {
         httpLanguage = d.string(forKey: Keys.httpLanguage) ?? "yue"
         whisperModel = d.string(forKey: Keys.whisperModel) ?? WhisperModelPreset.defaultModel
         manageSidecar = d.object(forKey: Keys.manageSidecar) as? Bool ?? true
+        llmProvider = LLMProvider(rawValue: d.string(forKey: Keys.llmProvider) ?? "") ?? .mlx
+        llmModel = d.string(forKey: Keys.llmModel) ?? LLMModelPreset.defaultModel
+        inputDeviceUID = d.string(forKey: Keys.inputDeviceUID) ?? ""
         polishMode = PolishMode(rawValue: d.string(forKey: Keys.polishMode) ?? "") ?? .colloquial
         ollamaHost = d.string(forKey: Keys.ollamaHost) ?? "http://127.0.0.1:11434"
         ollamaModel = d.string(forKey: Keys.ollamaModel) ?? "qwen3:14b"
@@ -212,8 +221,61 @@ extension AppSettings {
     }
 }
 
+enum LLMProvider: String, CaseIterable, Identifiable, Codable {
+    case mlx
+    case ollama
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .mlx: return "MLX（本地伺服器，Qwen3）"
+        case .ollama: return "Ollama"
+        }
+    }
+}
+
+/// 常用 MLX LLM。任何 HuggingFace 上 mlx-community 格式嘅 instruct 模型都可以手動輸入。
+enum LLMModelPreset: String, CaseIterable, Identifiable {
+    case qwen3_14b = "mlx-community/Qwen3-14B-4bit"
+    case qwen3_8b = "mlx-community/Qwen3-8B-4bit"
+    case qwen3_30bA3b = "mlx-community/Qwen3-30B-A3B-4bit"
+
+    static let defaultModel = LLMModelPreset.qwen3_14b.rawValue
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .qwen3_14b: return "Qwen3 14B 4-bit（推薦，約 8 GB）"
+        case .qwen3_8b: return "Qwen3 8B 4-bit（快，約 5 GB）"
+        case .qwen3_30bA3b: return "Qwen3 30B-A3B 4-bit（MoE，約 17 GB）"
+        }
+    }
+}
+
 extension AppSettings {
+    /// 伺服器 base URL（由辨識網址推算）：http://127.0.0.1:8787
+    var sidecarBaseURL: String {
+        guard let url = URL(string: httpURL), let host = url.host() else { return "http://127.0.0.1:8787" }
+        let scheme = url.scheme ?? "http"
+        let port = url.port.map { ":\($0)" } ?? ""
+        return "\(scheme)://\(host)\(port)"
+    }
+
+    /// 傳畀 sidecar 嘅 LLM 模型；用 Ollama 就唔載入。
+    var sidecarLLMModel: String {
+        llmProvider == .mlx ? llmModel : "none"
+    }
+
     var polishConfig: PolishConfig {
-        PolishConfig(host: ollamaHost, model: ollamaModel, fallbackModel: ollamaFallbackModel)
+        PolishConfig(
+            provider: llmProvider,
+            mlxBaseURL: sidecarBaseURL,
+            mlxModel: llmModel,
+            ollamaHost: ollamaHost,
+            ollamaModel: ollamaModel,
+            ollamaFallbackModel: ollamaFallbackModel
+        )
     }
 }

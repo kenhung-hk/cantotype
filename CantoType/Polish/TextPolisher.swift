@@ -4,15 +4,62 @@ enum PolishError: LocalizedError {
     case badHost
     case empty
     case incomplete
+    case notReady(String)
     case server(Int, String)
 
     var errorDescription: String? {
         switch self {
-        case .badHost: return "Ollama 網址無效"
+        case .badHost: return "LLM 網址無效"
         case .empty: return "LLM 冇回應內容"
         case .incomplete: return "Ollama 回應中途斬斷"
-        case .server(let code, let body): return "Ollama 回應 \(code)：\(body.prefix(160))"
+        case .notReady(let detail): return "LLM 未就緒：\(detail)"
+        case .server(let code, let body): return "LLM 回應 \(code)：\(body.prefix(160))"
         }
+    }
+}
+
+/// OpenAI 相容 `/v1/chat/completions`：CantoType 嘅 MLX 伺服器、mlx_lm.server、LM Studio 都用得。
+struct OpenAIChatClient {
+    let baseURL: URL
+
+    func chat(model: String, messages: [OllamaClient.Message], temperature: Double = 0.1, maxTokens: Int = 2048, timeout: TimeInterval = 90) async throws -> String {
+        let payload: [String: Any] = [
+            "model": model,
+            "messages": messages.map { ["role": $0.role, "content": $0.content] },
+            "temperature": temperature,
+            "max_tokens": maxTokens,
+            "stream": false,
+        ]
+        var request = URLRequest(url: baseURL.appending(path: "v1/chat/completions"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = timeout
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 503 {
+            struct ErrorReply: Decodable {
+                struct Detail: Decodable { let message: String }
+                let error: Detail
+            }
+            let detail = (try? JSONDecoder().decode(ErrorReply.self, from: data))?.error.message ?? "載入中"
+            throw PolishError.notReady(detail)
+        }
+        guard (200..<300).contains(status) else {
+            throw PolishError.server(status, String(data: data, encoding: .utf8) ?? "")
+        }
+        struct Reply: Decodable {
+            struct Choice: Decodable {
+                struct Msg: Decodable { let content: String }
+                let message: Msg
+            }
+            let choices: [Choice]
+        }
+        guard let content = try JSONDecoder().decode(Reply.self, from: data).choices.first?.message.content else {
+            throw PolishError.empty
+        }
+        return content
     }
 }
 
@@ -101,12 +148,22 @@ struct OllamaClient {
 }
 
 struct PolishConfig {
-    var host: String
-    var model: String
-    /// 主模型回應斬斷時用嘅備用模型；留空就直接用原文。
-    var fallbackModel: String
+    var provider: LLMProvider
+    var mlxBaseURL: String
+    var mlxModel: String
+    var ollamaHost: String
+    var ollamaModel: String
+    /// Ollama 主模型回應斬斷時用嘅備用模型；留空就直接用原文。
+    var ollamaFallbackModel: String
 
-    static let cliDefault = PolishConfig(host: "http://127.0.0.1:11434", model: "qwen3:14b", fallbackModel: "qwen2.5vl:7b")
+    static let cliDefault = PolishConfig(
+        provider: .mlx,
+        mlxBaseURL: "http://127.0.0.1:8787",
+        mlxModel: LLMModelPreset.defaultModel,
+        ollamaHost: "http://127.0.0.1:11434",
+        ollamaModel: "qwen3:14b",
+        ollamaFallbackModel: "qwen2.5vl:7b"
+    )
 }
 
 final class TextPolisher {
@@ -121,37 +178,20 @@ final class TextPolisher {
 
     func polish(_ raw: String, mode: PolishMode, vocabulary: [String], config: PolishConfig) async throws -> String {
         guard mode != .raw else { return raw }
-        guard let hostURL = URL(string: config.host) else { throw PolishError.badHost }
-        let client = OllamaClient(host: hostURL)
         let input = InputNormalizer.prepare(raw)
         let messages: [OllamaClient.Message] = [
             .init(role: "system", content: Prompts.system(mode: mode, vocabulary: vocabulary)),
             .init(role: "user", content: input),
         ]
 
-        // 1) 主模型；2) 斬斷就換個 seed／溫度再試；3) 仍然斬斷就用備用模型
-        var attempts: [() async throws -> String] = [
-            { try await client.chat(model: config.model, messages: messages) },
-            { try await client.chat(model: config.model, messages: messages, temperature: 0.6, seed: 7) },
-        ]
-        let fallback = config.fallbackModel.trimmingCharacters(in: .whitespaces)
-        if !fallback.isEmpty, fallback != config.model {
-            attempts.append { try await client.chat(model: fallback, messages: messages) }
+        let reply: String
+        switch config.provider {
+        case .mlx:
+            guard let base = URL(string: config.mlxBaseURL) else { throw PolishError.badHost }
+            reply = try await OpenAIChatClient(baseURL: base).chat(model: config.mlxModel, messages: messages)
+        case .ollama:
+            reply = try await polishWithOllama(messages: messages, config: config)
         }
-
-        var reply = ""
-        var lastError: Error = PolishError.incomplete
-        for attempt in attempts {
-            do {
-                reply = try await attempt()
-                lastError = PolishError.empty
-                break
-            } catch PolishError.incomplete {
-                lastError = PolishError.incomplete
-                continue
-            }
-        }
-        if reply.isEmpty, case PolishError.incomplete = lastError { throw PolishError.incomplete }
 
         let cleaned = Self.sanitize(reply)
         guard !cleaned.isEmpty else { throw PolishError.empty }
@@ -160,11 +200,34 @@ final class TextPolisher {
         return cleaned
     }
 
+    /// Ollama：1) 主模型；2) 斬斷就換個 seed／溫度再試；3) 仍然斬斷就用備用模型
+    private func polishWithOllama(messages: [OllamaClient.Message], config: PolishConfig) async throws -> String {
+        guard let hostURL = URL(string: config.ollamaHost) else { throw PolishError.badHost }
+        let client = OllamaClient(host: hostURL)
+        var attempts: [() async throws -> String] = [
+            { try await client.chat(model: config.ollamaModel, messages: messages) },
+            { try await client.chat(model: config.ollamaModel, messages: messages, temperature: 0.6, seed: 7) },
+        ]
+        let fallback = config.ollamaFallbackModel.trimmingCharacters(in: .whitespaces)
+        if !fallback.isEmpty, fallback != config.ollamaModel {
+            attempts.append { try await client.chat(model: fallback, messages: messages) }
+        }
+        for attempt in attempts {
+            do {
+                return try await attempt()
+            } catch PolishError.incomplete {
+                continue
+            }
+        }
+        throw PolishError.incomplete
+    }
+
+    /// Ollama 先需要 warm-up；MLX 伺服器由 MLXSidecar 管理。
     func warmUp(config: PolishConfig) async -> Bool {
-        guard let hostURL = URL(string: config.host) else { return false }
+        guard config.provider == .ollama, let hostURL = URL(string: config.ollamaHost) else { return true }
         let client = OllamaClient(host: hostURL)
         guard await client.isReachable() else { return false }
-        await client.preload(model: config.model)
+        await client.preload(model: config.ollamaModel)
         return true
     }
 

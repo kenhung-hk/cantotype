@@ -68,7 +68,7 @@ struct HUDView: View {
                 .font(.system(size: 14, weight: .medium))
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
-            if state.phase == .recording {
+            if case .recording = state.phase {
                 LevelMeter(level: state.level)
             }
         }

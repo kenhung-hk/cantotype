@@ -12,6 +12,38 @@ struct AudioClip {
     var duration: Double { Double(samples.count) / sampleRate }
     var isEmpty: Bool { samples.isEmpty }
 
+    struct LevelStats {
+        let peakDb: Float
+        let rmsDb: Float
+    }
+
+    /// 峰值同 RMS（dBFS）。
+    var stats: LevelStats {
+        guard !samples.isEmpty else { return LevelStats(peakDb: -120, rmsDb: -120) }
+        var peak: Float = 0
+        var sum: Float = 0
+        for sample in samples {
+            let f = abs(Float(sample) / 32768)
+            peak = max(peak, f)
+            sum += f * f
+        }
+        let rms = sqrt(sum / Float(samples.count))
+        return LevelStats(
+            peakDb: 20 * log10(max(peak, 1e-6)),
+            rmsDb: 20 * log10(max(rms, 1e-6))
+        )
+    }
+
+    /// 細聲錄音自動增益到正常音量（最多 +maxGainDb），大聲嘅唔郁。
+    func normalized(targetPeakDb: Float = -3, maxGainDb: Float = 30) -> AudioClip {
+        let current = stats.peakDb
+        guard current < targetPeakDb - 1 else { return self }
+        let gainDb = min(targetPeakDb - current, maxGainDb)
+        let gain = powf(10, gainDb / 20)
+        let boosted = samples.map { Int16(clamping: Int32((Float($0) * gain).rounded())) }
+        return AudioClip(samples: boosted, sampleRate: sampleRate)
+    }
+
     func pcmBuffer() -> AVAudioPCMBuffer? {
         guard !samples.isEmpty,
               let buffer = AVAudioPCMBuffer(pcmFormat: Self.format, frameCapacity: AVAudioFrameCount(samples.count)),

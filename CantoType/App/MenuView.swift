@@ -5,7 +5,7 @@ struct MenuView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var settings: AppSettings
     @EnvironmentObject var history: HistoryStore
-    @EnvironmentObject var sidecar: WhisperSidecar
+    @EnvironmentObject var sidecar: MLXSidecar
 
     var body: some View {
         Text("狀態：\(state.phase.label)")
@@ -52,19 +52,20 @@ struct MenuView: View {
         if !state.microphoneGranted {
             Button("⚠️ 未授權麥克風 — 按此設定…") { Permissions.openMicrophoneSettings() }
         }
-        if settings.polishMode != .raw, state.ollamaReachable == false {
+        if settings.polishMode != .raw, settings.llmProvider == .ollama, state.ollamaReachable == false {
             Text("⚠️ 連接唔到 Ollama（\(settings.ollamaModel)），會直接貼上原文")
         }
         if settings.backend == .apple, !state.appleAssetStatus.isEmpty {
             Text("Apple 語音：\(state.appleAssetStatus)")
         }
-        if settings.backend == .http, settings.sidecarPort != nil {
-            Text("MLX Whisper：\(sidecar.status.label)")
-            if case .starting = sidecar.status, !sidecar.lastLogLine.isEmpty {
+        if settings.sidecarPort != nil {
+            Text("MLX：\(sidecar.summary)")
+            if sidecar.state == .starting || (sidecar.isRunning && !sidecar.llmReady && sidecar.llmError == nil && settings.llmProvider == .mlx),
+               !sidecar.lastLogLine.isEmpty {
                 Text("　" + truncated(sidecar.lastLogLine, 48))
             }
-            if case .failed = sidecar.status {
-                Button("重啟 Whisper 伺服器") { state.restartSidecar() }
+            if case .failed = sidecar.state {
+                Button("重啟 MLX 伺服器") { state.restartSidecar() }
             }
         }
         Divider()

@@ -9,6 +9,7 @@ struct HistoryItem: Identifiable, Codable {
     var backend: String
     var mode: PolishMode
     var elapsed: Double
+    var peakDb: Float?
 }
 
 @MainActor
