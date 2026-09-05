@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import logging
 import logging.handlers
 import os
@@ -167,8 +168,9 @@ def transcribe_array(audio: np.ndarray, language: str | None, prompt, model: str
     """`model` 非空就用另一個 Whisper repo（模型試驗室用）；mlx_whisper 會自己換模型。
 
     `prompt`：None → 伺服器預設句；NO_PROMPT → 完全唔用 prompt；其他 → 該字串。
-    temperature 固定 0：Whisper 預設遇到低信心會升溫重試（0.2…1.0），高溫出嚟嘅係亂碼
-    （例如「該Est補lang戰鬆自己嘅享受嚟失踷死」），對口述輸入嚟講寧願要一個低信心但正常嘅句子。
+    解碼：greedy 為主，只有重複迴圈先升溫（見 STATE["temperature"] 註解）；唔會因為「冇人講嘢」機率高而丟走
+    段落（用戶係按住快捷鍵先錄，一定有人講嘢）。
+    語言：large-v3 之前嘅 Whisper（vocab 51865）冇 "yue" token，用 yue 會掟 ValueError；呢類模型自動改用 zh。
     """
     if prompt is NO_PROMPT:
         initial_prompt = None
@@ -176,19 +178,33 @@ def transcribe_array(audio: np.ndarray, language: str | None, prompt, model: str
         initial_prompt = STATE["prompt"] or None
     else:
         initial_prompt = str(prompt)
+    lang = language or STATE["language"]
     with WHISPER_LOCK:
-        return mlx_whisper.transcribe(
-            audio,
-            path_or_hf_repo=model or STATE["whisper_model"],
-            language=language or STATE["language"],
-            initial_prompt=initial_prompt,
-            condition_on_previous_text=False,
-            no_speech_threshold=None,
-            logprob_threshold=None,
-            compression_ratio_threshold=2.4,
-            temperature=STATE["temperature"],
-            fp16=True,
-        )
+        try:
+            result = _transcribe(audio, lang, initial_prompt, model)
+        except ValueError as exc:
+            if lang == "yue" and "not in tuple" in str(exc):
+                result = _transcribe(audio, "zh", initial_prompt, model)
+                result["language_used"] = "zh"
+            else:
+                raise
+    result.setdefault("language_used", lang)
+    return result
+
+
+def _transcribe(audio: np.ndarray, language: str, initial_prompt: str | None, model: str | None) -> dict:
+    return mlx_whisper.transcribe(
+        audio,
+        path_or_hf_repo=model or STATE["whisper_model"],
+        language=language,
+        initial_prompt=initial_prompt,
+        condition_on_previous_text=False,
+        no_speech_threshold=None,
+        logprob_threshold=None,
+        compression_ratio_threshold=2.4,
+        temperature=STATE["temperature"],
+        fp16=True,
+    )
 
 
 # ---------------------------------------------------------------- LLM
@@ -319,19 +335,10 @@ async def transcriptions(
                 tmp.write(data)
                 path = tmp.name
             try:
-                with WHISPER_LOCK:
-                    return mlx_whisper.transcribe(
-                        path,
-                        path_or_hf_repo=override or STATE["whisper_model"],
-                        language=language or STATE["language"],
-                        initial_prompt=prompt if prompt is not None else STATE["prompt"],
-                        condition_on_previous_text=False,
-                        no_speech_threshold=None,
-                        logprob_threshold=None,
-                        compression_ratio_threshold=2.4,
-                        temperature=STATE["temperature"],
-                        fp16=True,
-                    )
+                import mlx_whisper.audio as whisper_audio
+
+                decoded = whisper_audio.load_audio(path)
+                return transcribe_array(normalize(np.asarray(decoded, dtype=np.float32)), language, prompt, override)
             finally:
                 os.unlink(path)
 
@@ -343,7 +350,7 @@ async def transcriptions(
     say(f"[asr {elapsed_ms} ms{' ' + override if override else ''}] {text}")
     if response_format == "text":
         return PlainTextResponse(text)
-    return {"text": text, "language": result.get("language"), "elapsed_ms": elapsed_ms, "model": override or STATE["whisper_model"]}
+    return {"text": text, "language": result.get("language_used") or result.get("language"), "elapsed_ms": elapsed_ms, "model": override or STATE["whisper_model"], "prompt_dropped": bool(result.get("prompt_dropped"))}
 
 
 @app.post("/v1/chat/completions")
@@ -374,6 +381,105 @@ async def chat_completions(body: dict = Body(...)):
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         "elapsed_ms": elapsed_ms,
     }
+
+
+# ---------------------------------------------------------------- model management（模型試驗室用）
+
+MODELS_DIR = os.path.expanduser("~/Library/Application Support/CantoType/models/whisper")
+CONVERT_JOBS: dict[str, dict] = {}
+CONVERT_LOCK = threading.Lock()
+
+
+def local_model_dir(repo: str) -> str:
+    return os.path.join(MODELS_DIR, repo.replace("/", "--"))
+
+
+@app.get("/models/inspect")
+def inspect_model(repo: str):
+    """{"format": "mlx" | "hf" | "local" | "unknown", "files": [...]}"""
+    if os.path.isdir(repo):
+        return {"repo": repo, "format": "local", "files": sorted(os.listdir(repo))[:20]}
+    converted = local_model_dir(repo)
+    if os.path.exists(os.path.join(converted, "weights.safetensors")):
+        return {"repo": repo, "format": "converted", "path": converted, "files": []}
+    from huggingface_hub import HfApi
+
+    try:
+        files = HfApi().list_repo_files(repo)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse(status_code=404, content={"error": {"message": f"HuggingFace 搵唔到 {repo}：{type(exc).__name__}"}})
+    names = {os.path.basename(f) for f in files}
+    if names & {"weights.safetensors", "weights.npz"}:
+        fmt = "mlx"
+    elif names & {"model.safetensors", "pytorch_model.bin"} or any(n.startswith("model-") and n.endswith(".safetensors") for n in names):
+        fmt = "hf"
+    else:
+        fmt = "unknown"
+    return {"repo": repo, "format": fmt, "files": sorted(files)[:40]}
+
+
+@app.post("/models/convert")
+def start_convert(body: dict = Body(...)):
+    """背景將 HF transformers Whisper 轉成 MLX；回傳 job id，用 GET /models/convert/{id} 睇進度。"""
+    repo = (body.get("repo") or "").strip()
+    if not repo:
+        return JSONResponse(status_code=400, content={"error": {"message": "缺少 repo"}})
+    out = local_model_dir(repo)
+    with CONVERT_LOCK:
+        for job_id, job in CONVERT_JOBS.items():
+            if job["repo"] == repo and job["status"] in ("running", "done"):
+                return {"job": job_id, **job}
+        job_id = uuid.uuid4().hex[:8]
+        CONVERT_JOBS[job_id] = {"repo": repo, "status": "running", "path": out, "log": ["開始…"], "error": None}
+
+    def worker():
+        job = CONVERT_JOBS[job_id]
+
+        def progress(message: str):
+            job["log"].append(message)
+            job["log"] = job["log"][-20:]
+            say(f"[convert {repo}] {message}")
+
+        try:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from convert_whisper import convert
+
+            convert(repo, out, "float16", progress)
+            job["status"] = "done"
+        except Exception as exc:  # noqa: BLE001
+            job["status"] = "failed"
+            job["error"] = f"{type(exc).__name__}: {exc}"
+            log.error("convert %s failed\n%s", repo, traceback.format_exc())
+            say(f"[convert {repo}] 失敗：{job['error']}")
+
+    threading.Thread(target=worker, daemon=True, name=f"convert-{job_id}").start()
+    return {"job": job_id, **CONVERT_JOBS[job_id]}
+
+
+@app.get("/models/convert/{job_id}")
+def convert_status(job_id: str):
+    job = CONVERT_JOBS.get(job_id)
+    if job is None:
+        return JSONResponse(status_code=404, content={"error": {"message": "無此 job"}})
+    return {"job": job_id, **job}
+
+
+@app.get("/models")
+def list_models():
+    """本地已轉換嘅 Whisper 模型。"""
+    result = []
+    if os.path.isdir(MODELS_DIR):
+        for name in sorted(os.listdir(MODELS_DIR)):
+            path = os.path.join(MODELS_DIR, name)
+            if os.path.exists(os.path.join(path, "weights.safetensors")):
+                source = name.replace("--", "/")
+                try:
+                    with open(os.path.join(path, "source.json")) as fp:
+                        source = json.load(fp).get("source", source)
+                except OSError:
+                    pass
+                result.append({"source": source, "path": path})
+    return {"whisper": result, "llm_loaded": list(LLMS.keys())}
 
 
 # ---------------------------------------------------------------- main

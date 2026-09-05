@@ -43,6 +43,8 @@ final class ModelLab: ObservableObject {
         enum Kind: Hashable {
             case apple(locale: String)
             case mlx(repo: String)
+            /// HuggingFace transformers 格式，要先由伺服器轉成 MLX
+            case hf(repo: String)
         }
 
         let kind: Kind
@@ -52,6 +54,7 @@ final class ModelLab: ObservableObject {
             switch kind {
             case .apple(let locale): return "apple:\(locale)"
             case .mlx(let repo): return "mlx:\(repo)"
+            case .hf(let repo): return "hf:\(repo)"
             }
         }
 
@@ -59,6 +62,14 @@ final class ModelLab: ObservableObject {
             switch kind {
             case .apple(let locale): return "Apple 內置 · \(locale)"
             case .mlx(let repo): return "MLX Whisper · \(repo)"
+            case .hf(let repo): return "Whisper fine-tune · \(repo)"
+            }
+        }
+
+        var repo: String? {
+            switch kind {
+            case .apple: return nil
+            case .mlx(let repo), .hf(let repo): return repo
             }
         }
     }
@@ -93,6 +104,8 @@ final class ModelLab: ObservableObject {
         var cer: Double?
         var error: String?
         var running = false
+        /// 進度說明（例如「轉換中：下載…」）
+        var note = ""
     }
 
     @Published private(set) var clip: AudioClip?
@@ -125,7 +138,11 @@ final class ModelLab: ObservableObject {
     private var player: AVAudioPlayer?
 
     private static let customWhisperKey = "labCustomWhisper"
+    private static let customHFWhisperKey = "labCustomHFWhisper"
     private static let customLLMKey = "labCustomLLM"
+    private static let convertedPathsKey = "labConvertedPaths"
+    /// HF repo → 已轉換嘅本地 MLX 路徑
+    @Published private(set) var convertedPaths: [String: String] = [:]
 
     init(state: AppState) {
         self.state = state
@@ -143,22 +160,26 @@ final class ModelLab: ObservableObject {
             ASRCandidate(kind: .apple(locale: "zh_HK"), isCustom: false),
             ASRCandidate(kind: .apple(locale: "yue_CN"), isCustom: false),
         ]
-        asr += WhisperModelPreset.allCases.map { ASRCandidate(kind: .mlx(repo: $0.rawValue), isCustom: false) }
+        asr += WhisperModelPreset.allCases.map {
+            ASRCandidate(kind: $0.needsConversion ? .hf(repo: $0.rawValue) : .mlx(repo: $0.rawValue), isCustom: false)
+        }
         asr += savedCustom(Self.customWhisperKey).map { ASRCandidate(kind: .mlx(repo: $0), isCustom: true) }
+        asr += savedCustom(Self.customHFWhisperKey).map { ASRCandidate(kind: .hf(repo: $0), isCustom: true) }
         asrCandidates = asr
         asrSelected = Set(asr.filter {
             switch $0.kind {
             case .apple(let locale): return locale == "zh_HK"
-            case .mlx: return true
+            case .mlx(let repo), .hf(let repo): return WhisperModelPreset(rawValue: repo)?.selectedByDefault ?? false
             }
         }.map(\.id))
+        convertedPaths = (UserDefaults.standard.dictionary(forKey: Self.convertedPathsKey) as? [String: String]) ?? [:]
 
         var llm = LLMModelPreset.allCases.map { LLMCandidate(kind: .mlx(repo: $0.rawValue), isCustom: false) }
         llm += savedCustom(Self.customLLMKey).map { LLMCandidate(kind: .mlx(repo: $0), isCustom: true) }
         llmCandidates = llm
         llmSelected = Set(llm.filter {
             if case .mlx(let repo) = $0.kind {
-                return repo == LLMModelPreset.qwen3_14b.rawValue || repo == LLMModelPreset.qwen3_8b.rawValue
+                return LLMModelPreset(rawValue: repo)?.selectedByDefault ?? false
             }
             return false
         }.map(\.id))
@@ -170,11 +191,32 @@ final class ModelLab: ObservableObject {
 
     func addCustomWhisper() {
         let repo = customWhisper.trimmingCharacters(in: .whitespaces)
-        guard !repo.isEmpty, !asrCandidates.contains(where: { $0.id == "mlx:\(repo)" }) else { return }
-        asrCandidates.append(ASRCandidate(kind: .mlx(repo: repo), isCustom: true))
-        asrSelected.insert("mlx:\(repo)")
-        UserDefaults.standard.set(savedCustom(Self.customWhisperKey) + [repo], forKey: Self.customWhisperKey)
-        customWhisper = ""
+        guard !repo.isEmpty, !asrCandidates.contains(where: { $0.repo == repo }) else { return }
+        status = "檢查 \(repo) 嘅格式…"
+        Task {
+            do {
+                try await ensureServer()
+                let format = try await inspectFormat(repo: repo)
+                let candidate: ASRCandidate
+                switch format {
+                case "mlx", "local", "converted":
+                    candidate = ASRCandidate(kind: .mlx(repo: repo), isCustom: true)
+                    UserDefaults.standard.set(savedCustom(Self.customWhisperKey) + [repo], forKey: Self.customWhisperKey)
+                case "hf":
+                    candidate = ASRCandidate(kind: .hf(repo: repo), isCustom: true)
+                    UserDefaults.standard.set(savedCustom(Self.customHFWhisperKey) + [repo], forKey: Self.customHFWhisperKey)
+                default:
+                    status = "\(repo) 唔係 Whisper 模型（搵唔到 weights）"
+                    return
+                }
+                asrCandidates.append(candidate)
+                asrSelected.insert(candidate.id)
+                customWhisper = ""
+                status = format == "hf" ? "已加入，第一次跑會自動轉成 MLX" : ""
+            } catch {
+                status = "加入失敗：\(error.localizedDescription)"
+            }
+        }
     }
 
     func addCustomLLM() {
@@ -189,8 +231,13 @@ final class ModelLab: ObservableObject {
     func remove(_ candidate: ASRCandidate) {
         asrCandidates.removeAll { $0.id == candidate.id }
         asrSelected.remove(candidate.id)
-        if case .mlx(let repo) = candidate.kind {
+        switch candidate.kind {
+        case .mlx(let repo):
             UserDefaults.standard.set(savedCustom(Self.customWhisperKey).filter { $0 != repo }, forKey: Self.customWhisperKey)
+        case .hf(let repo):
+            UserDefaults.standard.set(savedCustom(Self.customHFWhisperKey).filter { $0 != repo }, forKey: Self.customHFWhisperKey)
+        case .apple:
+            break
         }
     }
 
@@ -323,6 +370,48 @@ final class ModelLab: ObservableObject {
         throw TranscriptionError.backendUnavailable("MLX 伺服器未能啟動：\(state.sidecar.summary)")
     }
 
+    private var serverBase: String { settings.sidecarBaseURL }
+
+    private func inspectFormat(repo: String) async throws -> String {
+        var components = URLComponents(string: serverBase + "/models/inspect")!
+        components.queryItems = [URLQueryItem(name: "repo", value: repo)]
+        let (data, response) = try await URLSession.shared.data(from: components.url!)
+        guard (response as? HTTPURLResponse)?.statusCode == 200,
+              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let format = json["format"] as? String
+        else { throw TranscriptionError.backendUnavailable("HuggingFace 搵唔到 \(repo)") }
+        return format
+    }
+
+    /// 已轉換就即刻回傳路徑；否則叫伺服器轉換，一路更新 row 嘅進度。
+    private func ensureConverted(repo: String, candidateID: String) async throws -> String {
+        if let path = convertedPaths[repo], FileManager.default.fileExists(atPath: path + "/weights.safetensors") {
+            return path
+        }
+        var request = URLRequest(url: URL(string: serverBase + "/models/convert")!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["repo": repo])
+        let (data, _) = try await URLSession.shared.data(for: request)
+        guard let job = try JSONSerialization.jsonObject(with: data) as? [String: Any], let jobID = job["job"] as? String else {
+            throw TranscriptionError.backendUnavailable("伺服器唔接受轉換要求")
+        }
+        var current = job
+        while (current["status"] as? String) == "running" {
+            let lastLog = (current["log"] as? [String])?.last ?? ""
+            asrResults[candidateID] = RunResult(running: true, note: "轉換成 MLX：\(lastLog)")
+            try await Task.sleep(for: .seconds(3))
+            let (poll, _) = try await URLSession.shared.data(from: URL(string: serverBase + "/models/convert/\(jobID)")!)
+            current = (try JSONSerialization.jsonObject(with: poll) as? [String: Any]) ?? current
+        }
+        guard (current["status"] as? String) == "done", let path = current["path"] as? String else {
+            throw TranscriptionError.backendUnavailable("轉換失敗：\((current["error"] as? String) ?? "未知原因")")
+        }
+        convertedPaths[repo] = path
+        UserDefaults.standard.set(convertedPaths, forKey: Self.convertedPathsKey)
+        return path
+    }
+
     func runASR() async {
         guard let clip, !asrRunning else { return }
         asrRunning = true
@@ -346,6 +435,15 @@ final class ModelLab: ObservableObject {
                         throw TranscriptionError.backendUnavailable("HTTP 網址無效")
                     }
                     let backend = HTTPTranscriptionBackend(url: url, model: repo, language: settings.httpLanguage, timeout: 900, prompt: settings.whisperPrompt)
+                    text = try await backend.transcribe(prepared)
+                case .hf(let repo):
+                    try await ensureServer()
+                    let path = try await ensureConverted(repo: repo, candidateID: candidate.id)
+                    asrResults[candidate.id] = RunResult(running: true, note: "辨識中…")
+                    guard let url = URL(string: settings.httpURL) else {
+                        throw TranscriptionError.backendUnavailable("HTTP 網址無效")
+                    }
+                    let backend = HTTPTranscriptionBackend(url: url, model: path, language: settings.httpLanguage, timeout: 900, prompt: settings.whisperPrompt)
                     text = try await backend.transcribe(prepared)
                 }
                 let cleaned = TranscriptCleaner.normalize(text)
@@ -414,7 +512,14 @@ final class ModelLab: ObservableObject {
         switch candidate.kind {
         case .apple(let locale): return settings.backend == .apple && settings.appleLocale == locale
         case .mlx(let repo): return settings.backend == .http && settings.whisperModel == repo
+        case .hf(let repo): return settings.backend == .http && convertedPaths[repo] != nil && settings.whisperModel == convertedPaths[repo]
         }
+    }
+
+    /// 未轉換嘅 fine-tune 唔可以直接設為預設，要先跑一次。
+    func canUse(_ candidate: ASRCandidate) -> Bool {
+        if case .hf(let repo) = candidate.kind { return convertedPaths[repo] != nil }
+        return true
     }
 
     func isDefault(_ candidate: LLMCandidate) -> Bool {
@@ -431,6 +536,10 @@ final class ModelLab: ObservableObject {
             settings.backend = .apple
         case .mlx(let repo):
             settings.whisperModel = repo
+            settings.backend = .http
+        case .hf(let repo):
+            guard let path = convertedPaths[repo] else { return }
+            settings.whisperModel = path
             settings.backend = .http
         }
         objectWillChange.send()
@@ -580,12 +689,13 @@ struct ModelLabView: View {
                         selected: lab.selectionBinding(asr: candidate.id),
                         result: lab.asrResults[candidate.id],
                         showCER: true,
+                        canUse: lab.canUse(candidate),
                         use: { lab.use(candidate) },
                         remove: { lab.remove(candidate) }
                     )
                     Divider()
                 }
-                Text("第一次用新模型會下載（Whisper 1.5 至 3 GB），呢一行會轉圈直至完成。CER 越低越準；同一段音檔亦可以聽返「播放」對比。")
+                Text("MLX 格式嘅模型第一次會下載（0.5 至 3 GB）；HuggingFace 格式嘅廣東話 fine-tune 會自動下載並轉成 MLX（1 至 6 GB，幾分鐘），呢一行會顯示進度。舊版 Whisper（large-v3 之前）冇 yue token，伺服器會自動改用 zh 解碼。CER 越低越準。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .padding(6)
@@ -637,6 +747,7 @@ struct ModelLabView: View {
                         selected: lab.selectionBinding(llm: candidate.id),
                         result: lab.llmResults[candidate.id],
                         showCER: false,
+                        canUse: true,
                         use: { lab.use(candidate) },
                         remove: { lab.remove(candidate) }
                     )
@@ -665,6 +776,7 @@ struct ModelLabView: View {
         selected: Binding<Bool>,
         result: ModelLab.RunResult?,
         showCER: Bool,
+        canUse: Bool,
         use: @escaping () -> Void,
         remove: @escaping () -> Void
     ) -> some View {
@@ -682,6 +794,9 @@ struct ModelLabView: View {
                     Spacer()
                     if let result {
                         if result.running {
+                            if !result.note.isEmpty {
+                                Text(result.note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
                             ProgressView().controlSize(.small)
                         } else {
                             if result.ms > 0 {
@@ -694,7 +809,7 @@ struct ModelLabView: View {
                             }
                         }
                     }
-                    Button("用呢個", action: use).disabled(isDefault)
+                    Button("用呢個", action: use).disabled(isDefault || !canUse)
                     if isCustom {
                         Button(role: .destructive, action: remove) { Image(systemName: "trash") }
                             .buttonStyle(.borderless)

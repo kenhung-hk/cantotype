@@ -221,21 +221,67 @@ final class AppSettings: ObservableObject {
     }
 }
 
-/// 常用 MLX Whisper 模型。任何 HuggingFace 上 MLX 格式嘅 Whisper repo 都可以手動輸入。
+/// 常用 Whisper 模型。`hf` 格式（HuggingFace transformers）會由伺服器自動轉成 MLX。
 enum WhisperModelPreset: String, CaseIterable, Identifiable {
+    // MLX 格式，直接用
     case cantoneseTurbo = "Huan69/whisper-large-v3-turbo-cantonese-yue-english-mlx"
+    case cantoneseTurboInt8 = "Huan69/whisper-large-v3-turbo-cantonese-yue-english-mlx-int8"
     case largeV3 = "mlx-community/whisper-large-v3-mlx"
     case largeV3Turbo = "mlx-community/whisper-large-v3-turbo"
+    case largeV2 = "mlx-community/whisper-large-v2-mlx"
+    case medium = "mlx-community/whisper-medium-mlx"
+    case small = "mlx-community/whisper-small-mlx"
+    case distilLargeV3 = "mlx-community/distil-whisper-large-v3"
+    // HuggingFace 格式嘅廣東話 fine-tune，第一次用會自動轉換
+    case alvanliiSmall = "alvanlii/whisper-small-cantonese"
+    case alvanliiDistilSmall = "alvanlii/distil-whisper-small-cantonese"
+    case khleelooLargeV3 = "khleeloo/whisper-large-v3-cantonese"
+    case simonLargeV2 = "simonl0909/whisper-large-v2-cantonese"
+    case wcyatMedium = "wcyat/whisper-medium-yue"
+    case safecantoneseSmall = "safecantonese/whisper-small-yue-full"
+    case scryaLargeV2 = "Scrya/whisper-large-v2-cantonese"
+    case wingskhTurbo = "wingskh/whisper-large-v3-turbo-cantonese"
+    case liujgoj = "Yvthyvq/Liujgoj-Cantonese-whisper"
 
-    static let defaultModel = WhisperModelPreset.cantoneseTurbo.rawValue
+    static let defaultModel = WhisperModelPreset.largeV3.rawValue
 
     var id: String { rawValue }
 
+    /// 需要由 HF 格式轉成 MLX 先用得。
+    var needsConversion: Bool {
+        switch self {
+        case .cantoneseTurbo, .cantoneseTurboInt8, .largeV3, .largeV3Turbo, .largeV2, .medium, .small, .distilLargeV3: return false
+        default: return true
+        }
+    }
+
+    /// 試驗室預設剔選嘅幾個。
+    var selectedByDefault: Bool {
+        switch self {
+        case .cantoneseTurbo, .largeV3, .alvanliiSmall: return true
+        default: return false
+        }
+    }
+
     var label: String {
         switch self {
-        case .cantoneseTurbo: return "large-v3-turbo 廣東話＋英文 fine-tune（推薦）"
-        case .largeV3: return "large-v3（原版，最準但最慢）"
-        case .largeV3Turbo: return "large-v3-turbo（原版，快）"
+        case .cantoneseTurbo: return "large-v3-turbo 廣東話＋英文 fine-tune（1.6 GB，快）"
+        case .cantoneseTurboInt8: return "同上 int8（0.9 GB）"
+        case .largeV3: return "large-v3 原版（3 GB，預設）"
+        case .largeV3Turbo: return "large-v3-turbo 原版（1.6 GB）"
+        case .largeV2: return "large-v2 原版（3 GB）"
+        case .medium: return "medium 原版（1.5 GB）"
+        case .small: return "small 原版（0.5 GB）"
+        case .distilLargeV3: return "distil-large-v3（1.5 GB，英文為主）"
+        case .alvanliiSmall: return "alvanlii small 廣東話 fine-tune（1 GB，最多人用，自動轉換）"
+        case .alvanliiDistilSmall: return "alvanlii distil-small 廣東話（0.6 GB，自動轉換）"
+        case .khleelooLargeV3: return "khleeloo large-v3 廣東話 fine-tune（6 GB，自動轉換）"
+        case .simonLargeV2: return "simonl0909 large-v2 廣東話 fine-tune（6 GB，自動轉換）"
+        case .wcyatMedium: return "wcyat medium 粵語 fine-tune（3 GB，自動轉換）"
+        case .safecantoneseSmall: return "safecantonese small 粵語 fine-tune（1 GB，自動轉換）"
+        case .scryaLargeV2: return "Scrya large-v2 廣東話 fine-tune（6 GB，自動轉換）"
+        case .wingskhTurbo: return "wingskh large-v3-turbo 廣東話 fine-tune（1.6 GB，自動轉換）"
+        case .liujgoj: return "Liujgoj Cantonese whisper（自動轉換）"
         }
     }
 }
@@ -268,17 +314,46 @@ enum LLMProvider: String, CaseIterable, Identifiable, Codable {
 enum LLMModelPreset: String, CaseIterable, Identifiable {
     case qwen3_14b = "mlx-community/Qwen3-14B-4bit"
     case qwen3_8b = "mlx-community/Qwen3-8B-4bit"
+    case qwen3_4b = "mlx-community/Qwen3-4B-4bit"
+    case qwen3_32b = "mlx-community/Qwen3-32B-4bit"
+    case qwen3_30bA3bInstruct = "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit"
     case qwen3_30bA3b = "mlx-community/Qwen3-30B-A3B-4bit"
+    case gemma3_12b = "mlx-community/gemma-3-12b-it-4bit"
+    case gemma3_27b = "mlx-community/gemma-3-27b-it-4bit"
+    case qwen25_14b = "mlx-community/Qwen2.5-14B-Instruct-4bit"
+    case mistralSmall = "mlx-community/Mistral-Small-3.2-24B-Instruct-2506-4bit"
+    case gptOss20b = "mlx-community/gpt-oss-20b-MXFP4-Q8"
+    case llama33_70b = "mlx-community/Llama-3.3-70B-Instruct-4bit"
+    case cantoneseQwen2_7b = "hyperkit/Qwen2-Cantonese-7B-Instruct-mlx"
+    case cantoneseLLMChat7b = "hyperkit/CantoneseLLMChat-v1.0-7B-mlx"
 
     static let defaultModel = LLMModelPreset.qwen3_14b.rawValue
 
     var id: String { rawValue }
 
+    var selectedByDefault: Bool {
+        switch self {
+        case .qwen3_14b, .qwen3_8b: return true
+        default: return false
+        }
+    }
+
     var label: String {
         switch self {
-        case .qwen3_14b: return "Qwen3 14B 4-bit（推薦，約 8 GB）"
+        case .qwen3_14b: return "Qwen3 14B 4-bit（預設，約 8 GB）"
         case .qwen3_8b: return "Qwen3 8B 4-bit（快，約 5 GB）"
+        case .qwen3_4b: return "Qwen3 4B 4-bit（最快，約 2.5 GB）"
+        case .qwen3_32b: return "Qwen3 32B 4-bit（約 18 GB）"
+        case .qwen3_30bA3bInstruct: return "Qwen3 30B-A3B Instruct 2507 4-bit（MoE，快，約 17 GB）"
         case .qwen3_30bA3b: return "Qwen3 30B-A3B 4-bit（MoE，約 17 GB）"
+        case .gemma3_12b: return "Gemma 3 12B it 4-bit（約 8 GB）"
+        case .gemma3_27b: return "Gemma 3 27B it 4-bit（約 16 GB）"
+        case .qwen25_14b: return "Qwen2.5 14B Instruct 4-bit（約 8 GB）"
+        case .mistralSmall: return "Mistral Small 3.2 24B 4-bit（約 14 GB）"
+        case .gptOss20b: return "gpt-oss 20B MXFP4（約 12 GB）"
+        case .llama33_70b: return "Llama 3.3 70B 4-bit（約 40 GB，慢）"
+        case .cantoneseQwen2_7b: return "Qwen2 Cantonese 7B Instruct（廣東話 fine-tune，約 4 GB）"
+        case .cantoneseLLMChat7b: return "CantoneseLLMChat v1.0 7B（廣東話 fine-tune，約 4 GB）"
         }
     }
 }

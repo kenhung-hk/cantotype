@@ -22,6 +22,8 @@ targets:
           - "**/.DS_Store"
       - path: server/mlx_server.py
         buildPhase: resources
+      - path: server/convert_whisper.py
+        buildPhase: resources
     info:
       path: CantoType/Info.plist
       properties:
