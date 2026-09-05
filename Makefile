@@ -3,7 +3,10 @@ BIN      := $(APP)/Contents/MacOS/CantoType
 
 .PHONY: gen build run cli clean open
 
-gen:            ## 由 project.yml 重新生成 .xcodeproj
+Config/Signing.xcconfig:
+	cp -n Config/Signing.xcconfig.example Config/Signing.xcconfig
+
+gen: Config/Signing.xcconfig   ## 由 project.yml 重新生成 .xcodeproj（第一次會建立本地簽名設定）
 	xcodegen generate
 
 build: gen      ## 用 xcodebuild 編譯 Debug 版
@@ -13,7 +16,7 @@ run: build      ## 編譯後啟動 app
 	pkill -x CantoType || true
 	open $(APP)
 
-open:           ## 用 Xcode 開 project
+open: gen       ## 用 Xcode 開 project
 	open CantoType.xcodeproj
 
 cli:            ## 例：make cli FILE=test.wav MODE=colloquial

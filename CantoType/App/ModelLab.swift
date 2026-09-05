@@ -321,6 +321,7 @@ final class ModelLab: ObservableObject {
                 switch candidate.kind {
                 case .apple(let locale):
                     let backend = AppleSpeechBackend(localeIdentifier: locale)
+                    backend.contextualStrings = settings.contextualStrings
                     try await backend.prepare()
                     text = try await backend.transcribe(prepared)
                 case .mlx(let repo):
@@ -328,7 +329,7 @@ final class ModelLab: ObservableObject {
                     guard let url = URL(string: settings.httpURL) else {
                         throw TranscriptionError.backendUnavailable("HTTP 網址無效")
                     }
-                    let backend = HTTPTranscriptionBackend(url: url, model: repo, language: settings.httpLanguage, timeout: 900)
+                    let backend = HTTPTranscriptionBackend(url: url, model: repo, language: settings.httpLanguage, timeout: 900, prompt: settings.whisperPrompt)
                     text = try await backend.transcribe(prepared)
                 }
                 let cleaned = TranscriptCleaner.normalize(text)
@@ -381,7 +382,7 @@ final class ModelLab: ObservableObject {
                     config.ollamaModel = model
                     config.ollamaFallbackModel = ""
                 }
-                let output = try await TextPolisher().polish(input, mode: llmMode, vocabulary: settings.vocabularyList, config: config)
+                let output = try await TextPolisher().polish(input, mode: llmMode, vocabulary: settings.llmVocabulary, config: config)
                 llmResults[candidate.id] = RunResult(text: output, ms: Int(Date().timeIntervalSince(started) * 1000))
             } catch {
                 llmResults[candidate.id] = RunResult(error: error.localizedDescription)

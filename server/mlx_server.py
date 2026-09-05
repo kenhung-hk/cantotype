@@ -100,6 +100,11 @@ def normalize(audio: np.ndarray, target_peak: float = 0.7, max_gain_db: float = 
     return np.clip(audio * gain, -1.0, 1.0).astype(np.float32)
 
 
+def looks_garbled(text: str) -> bool:
+    """prompt 唔啱時 Whisper 會出 U+FFFD 或者同一個字重複十幾次。"""
+    return "\ufffd" in text or re.search(r"(.)\1{4,}", text) is not None
+
+
 def transcribe_array(audio: np.ndarray, language: str | None, prompt: str | None, model: str | None = None) -> dict:
     """`model` 非空就用另一個 Whisper repo（模型試驗室用）；mlx_whisper 會自己換模型。"""
     with WHISPER_LOCK:
@@ -218,7 +223,14 @@ async def transcriptions(
     def work() -> dict:
         try:
             audio = normalize(decode_wav(data))
-            return transcribe_array(audio, language, prompt, override)
+            result = transcribe_array(audio, language, prompt, override)
+            # prompt 太長／太怪會令 Whisper 完全唔出字或者出亂碼；咁就唔要 prompt 再試一次
+            text = (result.get("text") or "").strip()
+            if prompt and (not text or looks_garbled(text)) and float(np.abs(audio).mean()) > 1e-4:
+                print(f"[asr] {'empty' if not text else 'garbled'} with prompt, retrying without", flush=True)
+                result = transcribe_array(audio, language, "", override)
+                result["prompt_dropped"] = True
+            return result
         except Exception:  # noqa: BLE001  唔係 16k WAV 就交畀 ffmpeg 解碼
             suffix = os.path.splitext(file.filename or "")[1] or ".bin"
             with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:

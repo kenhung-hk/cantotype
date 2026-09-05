@@ -71,6 +71,14 @@ struct SettingsView: View {
         )
     }
 
+    /// 顯示自動生成句；用戶一改就變成自訂。
+    private var whisperPromptBinding: Binding<String> {
+        Binding(
+            get: { settings.whisperPromptCustom.isEmpty ? settings.whisperPromptGenerated : settings.whisperPromptCustom },
+            set: { settings.whisperPromptCustom = ($0 == settings.whisperPromptGenerated) ? "" : $0 }
+        )
+    }
+
     private func refreshDevices() {
         inputDevices = AudioDevices.inputDevices()
         defaultInputName = AudioDevices.defaultInputDevice()?.name ?? ""
@@ -191,11 +199,32 @@ struct SettingsView: View {
                     Text(polishTestResult).font(.caption).textSelection(.enabled)
                 }
             }
-            Section("常用詞彙") {
+            Section("講者背景同詞彙") {
+                TextField("講者背景（寫入 Whisper 同 LLM 嘅 prompt）", text: $settings.speakerContext, axis: .vertical)
+                    .lineLimit(2...4)
+                Toggle("修正聽錯嘅英文技術詞（get hub → GitHub、sequel → SQL、Q 班 → Kubernetes）", isOn: $settings.techCorrection)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Whisper prompt")
+                        Spacer()
+                        if !settings.whisperPromptCustom.isEmpty {
+                            Button("還原自動生成") { settings.whisperPromptCustom = "" }
+                                .controlSize(.small)
+                        } else {
+                            Text("自動生成，可直接改").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    TextField("", text: whisperPromptBinding, axis: .vertical)
+                        .lineLimit(2...4)
+                        .font(.callout)
+                    Text("Whisper 每次辨識都會先讀呢一句。要短、要係自然句子、只提幾個最重要嘅英文詞；放清單或者太長會令佢出空白或亂碼（伺服器會自動退回唔用 prompt）。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 TextEditor(text: $settings.vocabulary)
                     .font(.body)
                     .frame(minHeight: 70)
-                Text("每行一個：人名、公司名、產品名。辨識到讀音相近嘅字會改用你嘅寫法。").font(.caption).foregroundStyle(.secondary)
+                Text("你自己嘅詞彙，每行一個：人名、公司名、產品名、內部 project 名。背景同詞彙會同時餵俾 Whisper（initial prompt）、Apple 語音同 LLM。Whisper 只會提及頭 12 個，所以最重要嘅放最前。")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

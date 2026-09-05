@@ -157,6 +157,9 @@ struct PolishConfig {
     var ollamaFallbackModel: String
     /// 試驗室載入新模型可能要幾分鐘，所以可以較長。
     var requestTimeout: TimeInterval = 90
+    /// 講者背景（寫入 system prompt）同「修正聽錯嘅英文技術詞」規則。
+    var speakerContext: String = SpeakerContext.defaultDescription
+    var techCorrection: Bool = true
 
     static let cliDefault = PolishConfig(
         provider: .mlx,
@@ -182,7 +185,7 @@ final class TextPolisher {
         guard mode != .raw else { return raw }
         let input = InputNormalizer.prepare(raw)
         let messages: [OllamaClient.Message] = [
-            .init(role: "system", content: Prompts.system(mode: mode, vocabulary: vocabulary)),
+            .init(role: "system", content: Prompts.system(mode: mode, vocabulary: vocabulary, speakerContext: config.speakerContext, techCorrection: config.techCorrection)),
             .init(role: "user", content: input),
         ]
 
@@ -277,8 +280,14 @@ enum InputNormalizer {
 }
 
 enum Prompts {
-    static func system(mode: PolishMode, vocabulary: [String]) -> String {
+    static func system(mode: PolishMode, vocabulary: [String], speakerContext: String = SpeakerContext.defaultDescription, techCorrection: Bool = true) -> String {
         var lines: [String] = []
+        // 講者背景放最前：實測放喺規則後面 Qwen3 14B 會忽略技術詞修正規則
+        let context = speakerContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !context.isEmpty {
+            lines.append("講者背景：\(context)")
+            lines.append("")
+        }
         switch mode {
         case .written:
             lines += [
@@ -311,9 +320,12 @@ enum Prompts {
             "6. 如果用戶講「新一行」、「另起一段」、「換行」，用換行代替呢幾個字。",
             "7. 只輸出整理後嘅文字，唔要有任何前言後語。",
         ]
+        if techCorrection {
+            lines.append("8. 英文技術詞語一律用標準寫法同大小寫，唔要翻譯成中文。辨識結果如果將英文詞聽錯成讀音相近嘅字，要改返做正確英文詞，例如：get hub→GitHub、sequel→SQL、post gres→PostgreSQL、Q 班／cube→Kubernetes、派森→Python、多卡→Docker、A P I→API、J son→JSON、red is→Redis。")
+        }
         if !vocabulary.isEmpty {
             lines.append("")
-            lines.append("以下係用戶常用嘅專有名詞或寫法。如果辨識結果有讀音相近但寫法唔同嘅字詞，請改用呢啲寫法：" + vocabulary.joined(separator: "、"))
+            lines.append("用戶常用嘅專有名詞（人名、公司、project 名）。辨識結果如果有讀音相近但寫法唔同嘅字詞，請改用呢啲寫法：" + vocabulary.joined(separator: "、"))
         }
         return lines.joined(separator: "\n")
     }

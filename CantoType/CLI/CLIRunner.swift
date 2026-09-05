@@ -14,6 +14,8 @@ enum CLIRunner {
       --url <網址>               HTTP 引擎網址（預設 http://127.0.0.1:8787/v1/audio/transcriptions）
       --language yue            HTTP 引擎語言代碼（預設 yue）
       --http-model <名稱>        HTTP 引擎模型名稱（可省略）
+      --plain                   唔要講者背景同英文技術詞修正（用嚟比較效果）
+      --show-prompt             同時印出送去 LLM／Whisper 嘅 prompt
       --mode raw|colloquial|written   LLM 整理模式（預設 raw，即唔整理）
       --llm mlx|ollama          LLM 提供者（預設 mlx，即 CantoType 嘅 MLX 伺服器）
       --llm-url <網址>           MLX 伺服器 base URL（預設 http://127.0.0.1:8787）
@@ -71,10 +73,12 @@ enum CLIRunner {
                     print("錯誤：HTTP 網址無效")
                     return 2
                 }
+                let plain = args.contains("--plain")
                 backend = HTTPTranscriptionBackend(
                     url: url,
                     model: value("--http-model", in: args) ?? "",
-                    language: value("--language", in: args) ?? "yue"
+                    language: value("--language", in: args) ?? "yue",
+                    prompt: plain ? nil : VocabularyProvider.whisperPrompt(user: [], context: SpeakerContext.defaultDescription, techCorrection: true)
                 )
             default:
                 let apple = AppleSpeechBackend(localeIdentifier: localeId)
@@ -107,6 +111,13 @@ enum CLIRunner {
     private static func polishOnly(_ text: String, args: [String]) async -> Int32 {
         let mode = PolishMode(rawValue: value("--mode", in: args) ?? "colloquial") ?? .colloquial
         let config = polishConfig(from: args)
+        if args.contains("--show-prompt") {
+            print("=== system prompt ===")
+            print(Prompts.system(mode: mode, vocabulary: [], speakerContext: config.speakerContext, techCorrection: config.techCorrection))
+            print("=== whisper prompt ===")
+            print(VocabularyProvider.whisperPrompt(user: [], context: config.speakerContext, techCorrection: config.techCorrection))
+            print("=====================")
+        }
         print("原文：\(text)")
         let started = Date()
         do {
@@ -128,6 +139,10 @@ enum CLIRunner {
         }
         if let host = value("--ollama", in: args) { config.ollamaHost = host }
         if let fallback = value("--fallback-model", in: args) { config.ollamaFallbackModel = fallback }
+        if args.contains("--plain") {
+            config.speakerContext = ""
+            config.techCorrection = false
+        }
         return config
     }
 

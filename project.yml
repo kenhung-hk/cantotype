@@ -8,14 +8,14 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     MACOSX_DEPLOYMENT_TARGET: "26.0"
-    # 簽名 team 放喺唔入 git 嘅 Config/Signing.xcconfig
-
-    DEVELOPMENT_TEAM: ""
-    CODE_SIGN_STYLE: Automatic
 targets:
   CantoType:
     type: application
     platform: macOS
+    # 簽名（team ID 等）放喺唔入 git 嘅 Config/Signing.xcconfig；見 Config/Signing.xcconfig.example
+    configFiles:
+      Debug: Config/Signing.xcconfig
+      Release: Config/Signing.xcconfig
     sources:
       - path: CantoType
         excludes:

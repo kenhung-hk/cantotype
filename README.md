@@ -43,23 +43,9 @@ make run        # xcodebuild 編譯再啟動
 
 ## 簽名
 
-`project.yml` 入面 `DEVELOPMENT_TEAM` 係你 keychain 裏面 Apple Development 證書嘅 team。用真證書簽名嘅好處係每次 rebuild 都保留「輔助使用」授權；如果冇證書，Xcode 會用 ad-hoc（Sign to Run Locally），咁每次 rebuild 之後可能要重新授權一次。
+Team ID 等簽名設定放喺 `Config/Signing.xcconfig`，呢個檔案唔會入 git（`make gen` 第一次會由 `Config/Signing.xcconfig.example` 複製一份）。預設係 ad-hoc 簽名，冇 Apple 開發者證書都 build 得；但 macOS 會將每次 rebuild 當成新 app，可能要重新授權「輔助使用」。有 Apple Development 證書就照 example 入面嘅註解填三行，授權就會一直保留。
 
-## 用 CLI 比較模型
-
-App 本身就係一個 CLI，方便用你自己嘅錄音測試唔同引擎、語言、整理模式：
-
-```sh
-scripts/record_sample.sh ~/Desktop/sample.wav 8        # 錄 8 秒
-
-BIN=build/Build/Products/Debug/CantoType.app/Contents/MacOS/CantoType
-$BIN --transcribe ~/Desktop/sample.wav                   # Apple zh_HK，原文
-$BIN --transcribe ~/Desktop/sample.wav --mode colloquial # + qwen3 口語整理
-$BIN --transcribe ~/Desktop/sample.wav --mode written    # + 轉書面語
-$BIN --transcribe ~/Desktop/sample.wav --locale yue_CN   # Apple 粵語（簡體）
-$BIN --transcribe ~/Desktop/sample.wav --backend http    # 用 Whisper 伺服器
-$BIN --help
-```
+`.xcodeproj` 亦唔入 git，由 `project.yml` 生成（`make gen` 或者 `xcodegen generate`）。
 
 ## 模型試驗室
 
@@ -83,6 +69,16 @@ Menubar → 「模型試驗室…」（⌘L）。錄一段（或者載入音檔�
 預設 MLX `mlx-community/Qwen3-14B-4bit`（thinking 關掉），一句約 1 至 3 秒，同 Whisper 用同一個伺服器。設定可以換 Qwen3 8B（快）或者任何 mlx-community 嘅 instruct 模型。
 
 Ollama 仍然係一個選項，但唔推薦：Qwen3 用 `think: false` 時，Ollama runner 遇到「英文字母緊貼中文字」（`K Y嗰邊`）會中途死機回傳半截答案（0.31 同 0.33 都係）。揀 Ollama 時 app 會先正規化輸入、斬斷就換 seed 重試、再用備用模型頂住。
+
+## 技術用語同講者背景
+
+設定 → 整理 → 「講者背景同詞彙」。預設寫住講者係「香港嘅 full stack developer，日常講廣東話夾雜英文技術用語」，可以改成你自己。背景會寫入三個地方：
+
+- **Whisper initial prompt**：一句自然嘅描述句，順帶提及你嘅詞彙（頭 12 個）同幾個技術詞錨點（GitHub、API、Kubernetes…）。實測放詞彙清單會令 Whisper 完全唔出字，所以一定係句子；伺服器亦會喺 prompt 令輸出變空白時自動唔用 prompt 再試一次。
+- **Apple 語音 contextual strings**：詞彙同技術詞。
+- **LLM system prompt**：講者背景 + 一條「修正聽錯嘅英文技術詞」規則（get hub → GitHub、sequel → SQL、post gres → PostgreSQL、Q 班 → Kubernetes、派森 → Python）+ 你自己嘅專有名詞。實測幾百個詞嘅清單會令 Qwen3 亂改（甚至加否定詞），一條有例子嘅規則反而最準。
+
+CLI 可以用 `--plain` 關掉背景同規則嚟比較效果。
 
 ## 聲太細
 
@@ -144,6 +140,7 @@ CantoType/
     HTTPTranscriptionBackend.swift  OpenAI 相容 HTTP 伺服器
   Polish/
     TextPolisher.swift          MLX（OpenAI 相容）／Ollama client、輸入正規化、廣東話 prompt
+    Vocabulary.swift            講者背景、Whisper prompt 句子、contextual strings
   CLI/
     CLIRunner.swift             --transcribe / --polish 命令列模式
 server/mlx_server.py            MLX 伺服器：Whisper + Qwen3（打包入 app bundle）

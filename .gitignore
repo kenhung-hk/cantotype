@@ -6,3 +6,5 @@ xcuserdata/
 server/.venv/
 server/__pycache__/
 build-sign/
+CantoType.xcodeproj/
+Config/Signing.xcconfig

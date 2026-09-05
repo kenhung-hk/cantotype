@@ -1,0 +1,14 @@
+// 簽名設定（本地檔案，唔會入 git）
+// 第一次：cp Config/Signing.xcconfig.example Config/Signing.xcconfig（make gen 會自動幫你做）
+//
+// 預設 ad-hoc 簽名：冇 Apple 開發者證書都 build 得、行得，
+// 但 macOS 會將每次 rebuild 當成新 app，可能要重新授權「輔助使用」。
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = -
+DEVELOPMENT_TEAM =
+PROVISIONING_PROFILE_SPECIFIER =
+
+// 有 Apple Development 證書就改成以下三行（team ID 係證書 OU 欄嗰個 10 位代碼）：
+// CODE_SIGN_STYLE = Automatic
+// CODE_SIGN_IDENTITY = Apple Development
+// DEVELOPMENT_TEAM = XXXXXXXXXX

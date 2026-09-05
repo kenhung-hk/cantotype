@@ -7,12 +7,15 @@ final class HTTPTranscriptionBackend: TranscriptionBackend {
     let model: String
     let language: String
     let timeout: TimeInterval
+    /// Whisper initial prompt（詞彙表）；nil 就用伺服器預設。
+    let prompt: String?
 
-    init(url: URL, model: String, language: String, timeout: TimeInterval = 120) {
+    init(url: URL, model: String, language: String, timeout: TimeInterval = 120, prompt: String? = nil) {
         self.url = url
         self.model = model
         self.language = language
         self.timeout = timeout
+        self.prompt = prompt
     }
 
     var displayName: String { "HTTP（\(url.host() ?? url.absoluteString)）" }
@@ -34,6 +37,7 @@ final class HTTPTranscriptionBackend: TranscriptionBackend {
         }
         if !model.isEmpty { field("model", model) }
         if !language.isEmpty { field("language", language) }
+        if let prompt, !prompt.isEmpty { field("prompt", prompt) }
         field("response_format", "json")
         body.appendUTF8("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\nContent-Type: audio/wav\r\n\r\n")
         body.append(clip.wavData())

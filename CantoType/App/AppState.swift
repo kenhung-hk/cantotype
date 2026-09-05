@@ -317,7 +317,7 @@ final class AppState: ObservableObject {
                     output = await polisher.polishOrFallback(
                         raw,
                         mode: settings.polishMode,
-                        vocabulary: settings.vocabularyList,
+                        vocabulary: settings.llmVocabulary,
                         config: settings.polishConfig
                     )
                     if output == raw, settings.polishMode != .raw, output.count > 8 {
@@ -367,12 +367,14 @@ final class AppState: ObservableObject {
     private func currentBackend() throws -> any TranscriptionBackend {
         switch settings.backend {
         case .apple:
-            return appleBackend(for: settings.appleLocale)
+            let backend = appleBackend(for: settings.appleLocale)
+            backend.contextualStrings = settings.contextualStrings
+            return backend
         case .http:
             guard let url = URL(string: settings.httpURL) else {
                 throw TranscriptionError.backendUnavailable("HTTP 網址無效")
             }
-            return HTTPTranscriptionBackend(url: url, model: settings.httpModel, language: settings.httpLanguage)
+            return HTTPTranscriptionBackend(url: url, model: settings.httpModel, language: settings.httpLanguage, prompt: settings.whisperPrompt)
         }
     }
 
@@ -422,8 +424,8 @@ final class AppState: ObservableObject {
         }
         let started = Date()
         do {
-            let sample = "呃 我覺得 K M同 K Y嗰邊 security可以做好啲 即係 睇下佢係唔係識得聽廣東話"
-            let result = try await polisher.polish(sample, mode: settings.polishMode, vocabulary: settings.vocabularyList, config: settings.polishConfig)
+            let sample = "呃 我覺得 K M同 K Y嗰邊 security可以做好啲 即係 我想將個 get hub 個 pull request merge 落 main 然後 deploy 上 kubernetes"
+            let result = try await polisher.polish(sample, mode: settings.polishMode, vocabulary: settings.llmVocabulary, config: settings.polishConfig)
             let ms = Int(Date().timeIntervalSince(started) * 1000)
             return "正常（\(ms) ms）：\(result)"
         } catch {

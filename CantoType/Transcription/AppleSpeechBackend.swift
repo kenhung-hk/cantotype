@@ -6,6 +6,8 @@ import Speech
 /// 支援 zh_HK（中文（香港），出繁體）同 yue_CN（粵語，出簡體）。
 final class AppleSpeechBackend: TranscriptionBackend {
     let locale: Locale
+    /// 詞彙表（人名、技術用語）：Apple 語音會偏向呢啲寫法。
+    var contextualStrings: [String] = []
     private var assetsReady = false
 
     init(localeIdentifier: String) {
@@ -45,6 +47,11 @@ final class AppleSpeechBackend: TranscriptionBackend {
 
         let transcriber = makeTranscriber()
         let analyzer = SpeechAnalyzer(modules: [transcriber])
+        if !contextualStrings.isEmpty {
+            let context = AnalysisContext()
+            context.contextualStrings[.general] = Array(contextualStrings.prefix(200))
+            try? await analyzer.setContext(context)
+        }
         let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) ?? AudioClip.format
         let input = try AudioConvert.convert(source, to: format)
 

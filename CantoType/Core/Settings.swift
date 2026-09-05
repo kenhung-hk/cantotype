@@ -134,6 +134,9 @@ final class AppSettings: ObservableObject {
         static let playSounds = "playSounds"
         static let showHUD = "showHUD"
         static let vocabulary = "vocabulary"
+        static let speakerContext = "speakerContext"
+        static let techCorrection = "techCorrection"
+        static let whisperPromptCustom = "whisperPromptCustom"
     }
 
     private let defaults = UserDefaults.standard
@@ -158,6 +161,10 @@ final class AppSettings: ObservableObject {
     @Published var playSounds: Bool { didSet { defaults.set(playSounds, forKey: Keys.playSounds) } }
     @Published var showHUD: Bool { didSet { defaults.set(showHUD, forKey: Keys.showHUD) } }
     @Published var vocabulary: String { didSet { defaults.set(vocabulary, forKey: Keys.vocabulary) } }
+    @Published var speakerContext: String { didSet { defaults.set(speakerContext, forKey: Keys.speakerContext) } }
+    @Published var techCorrection: Bool { didSet { defaults.set(techCorrection, forKey: Keys.techCorrection) } }
+    /// 用戶自己寫嘅 Whisper prompt；空就用自動生成嗰句。
+    @Published var whisperPromptCustom: String { didSet { defaults.set(whisperPromptCustom, forKey: Keys.whisperPromptCustom) } }
 
     init() {
         let d = UserDefaults.standard
@@ -181,9 +188,31 @@ final class AppSettings: ObservableObject {
         playSounds = d.object(forKey: Keys.playSounds) as? Bool ?? true
         showHUD = d.object(forKey: Keys.showHUD) as? Bool ?? true
         vocabulary = d.string(forKey: Keys.vocabulary) ?? ""
+        speakerContext = d.string(forKey: Keys.speakerContext) ?? SpeakerContext.defaultDescription
+        techCorrection = d.object(forKey: Keys.techCorrection) as? Bool ?? true
+        whisperPromptCustom = d.string(forKey: Keys.whisperPromptCustom) ?? ""
     }
 
-    /// 常用詞彙：每行一個，或者用逗號分隔。
+    /// 餵俾 LLM 嘅詞彙：只係用戶自己嘅（技術詞靠規則，唔靠清單）。
+    var llmVocabulary: [String] { vocabularyList }
+
+    /// 餵俾 Apple 語音嘅 contextual strings。
+    var contextualStrings: [String] {
+        VocabularyProvider.contextualStrings(user: vocabularyList, techCorrection: techCorrection)
+    }
+
+    /// 自動生成嘅 Whisper prompt（由講者背景同詞彙砌出來）。
+    var whisperPromptGenerated: String {
+        VocabularyProvider.whisperPrompt(user: vocabularyList, context: speakerContext, techCorrection: techCorrection)
+    }
+
+    /// 實際餵俾 Whisper 嘅 initial prompt：用戶有自己寫就用佢，否則用自動生成嗰句。
+    var whisperPrompt: String {
+        let custom = whisperPromptCustom.trimmingCharacters(in: .whitespacesAndNewlines)
+        return custom.isEmpty ? whisperPromptGenerated : custom
+    }
+
+    /// 用戶自己嘅常用詞彙：每行一個，或者用逗號分隔。
     var vocabularyList: [String] {
         vocabulary
             .split(whereSeparator: { $0.isNewline || $0 == "," || $0 == "，" || $0 == "、" })
@@ -275,7 +304,9 @@ extension AppSettings {
             mlxModel: llmModel,
             ollamaHost: ollamaHost,
             ollamaModel: ollamaModel,
-            ollamaFallbackModel: ollamaFallbackModel
+            ollamaFallbackModel: ollamaFallbackModel,
+            speakerContext: speakerContext,
+            techCorrection: techCorrection
         )
     }
 }
